@@ -66,12 +66,24 @@ export interface NimahEvents {
   NimahSpeechRms: { level: number };
 }
 
-export const Nimah = {
-  ...(native as NativeAPI),
-  on<K extends keyof NimahEvents>(event: K, cb: (payload: NimahEvents[K]) => void): EmitterSubscription {
-    return emitter.addListener(event, cb as (p: unknown) => void);
-  },
+type NimahApi = NativeAPI & {
+  on<K extends keyof NimahEvents>(event: K, cb: (payload: NimahEvents[K]) => void): EmitterSubscription;
 };
+
+function on<K extends keyof NimahEvents>(event: K, cb: (payload: NimahEvents[K]) => void): EmitterSubscription {
+  return emitter.addListener(event, cb as (p: unknown) => void);
+}
+
+// NOTE: do NOT spread the native module ({ ...native }). On the new architecture its methods are not
+// enumerable, so a spread copy would be empty and every call would be "undefined is not a function".
+// A Proxy forwards each call to the real module instead.
+export const Nimah = new Proxy({} as NimahApi, {
+  get(_t, prop: string) {
+    if (prop === 'on') return on;
+    const v = (native as any)[prop];
+    return typeof v === 'function' ? v.bind(native) : v;
+  },
+});
 
 /** Asks for everything Nimah can use. Only the microphone is mandatory. */
 export async function requestPermissions(): Promise<{ mic: boolean; contacts: boolean }> {
