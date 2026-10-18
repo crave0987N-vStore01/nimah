@@ -148,41 +148,41 @@ async function execute(step: AgentStep, h: AgentHooks, _n: number, markConfirmed
     switch (step.action) {
       case 'tap': case 'long_press': {
         const ok = await Nimah.uiClick(step.id!, step.action === 'long_press');
-        await Nimah.waitForIdle(350, 2500);
+        await Nimah.waitForIdle(220, 1800);
         return ok ? 'ok' : 'failed';
       }
       case 'type': {
         const ok = await Nimah.uiType(step.id ?? -1, step.text!, !!step.submit);
-        await Nimah.waitForIdle(300, 2000);
+        await Nimah.waitForIdle(200, 1500);
         return ok ? 'ok' : 'failed (field not editable?)';
       }
       case 'scroll': {
         const ok = await Nimah.uiScroll(step.direction ?? 'down', step.id ?? -1);
-        await Nimah.waitForIdle(300, 2000);
+        await Nimah.waitForIdle(200, 1500);
         return ok ? 'ok' : 'cannot scroll further';
       }
       case 'back': case 'home': case 'recents': case 'notifications':
       case 'quick_settings': case 'lock_screen': case 'power_menu': {
         const ok = await Nimah.uiGlobal(step.action);
-        await Nimah.waitForIdle(400, 2500);
+        await Nimah.waitForIdle(250, 1800);
         return ok ? 'ok' : 'not supported';
       }
       case 'screenshot': {
         const ok = await Nimah.uiGlobal('take_screenshot');
-        await Nimah.waitForIdle(500, 3000);
+        await Nimah.waitForIdle(350, 2500);
         return ok ? 'ok (saved to gallery)' : 'not supported on this Android version';
       }
       case 'open_app':
         await Nimah.openApp(step.text!);
-        await Nimah.waitForIdle(700, 6000);
+        await Nimah.waitForIdle(450, 5000);
         return 'ok';
       case 'open_url':
         await Nimah.openUrl(step.text!);
-        await Nimah.waitForIdle(900, 7000);
+        await Nimah.waitForIdle(600, 6000);
         return 'ok';
       case 'open_settings':
         await Nimah.openSettings(step.text ?? 'main');
-        await Nimah.waitForIdle(600, 4000);
+        await Nimah.waitForIdle(400, 3000);
         return 'ok';
       case 'set_volume':
         await Nimah.setVolume(step.level!, 'music');

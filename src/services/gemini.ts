@@ -28,12 +28,12 @@ let runtimeKeys: string[] = [];                      // keys the user pasted ins
 const allKeys = () => Array.from(new Set([...runtimeKeys, GEMINI_API_KEY, ...(GEMINI_API_KEYS ?? [])].filter(isRealKey)));
 /** Replaces the in-app keys (used first). Clears all cool-downs so the new key is tried at once. */
 export function setRuntimeKeys(keys: string[]) { runtimeKeys = keys.map((k) => k.trim()).filter(isRealKey); sleepUntil.clear(); }
-const MODELS = Array.from(new Set([
-  GEMINI_MODEL, 'gemini-flash-latest', 'gemini-flash-lite-latest',
-  'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.5-flash',
-]));
+// Command parsing is a simple job -> the FAST (lite) models go first. The screen agent reasons more -> smarter first.
+const ALL_MODELS = ['gemini-flash-latest', 'gemini-flash-lite-latest', 'gemini-3.1-flash-lite', 'gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+const FAST_FIRST = Array.from(new Set(['gemini-flash-lite-latest', 'gemini-3.1-flash-lite', GEMINI_MODEL, ...ALL_MODELS]));
+const SMART_FIRST = Array.from(new Set([GEMINI_MODEL, 'gemini-flash-latest', 'gemini-3.5-flash', ...ALL_MODELS]));
 interface Combo { id: string; key: string; model: string }
-const combos = (): Combo[] => { const ks = allKeys(); return MODELS.flatMap((m) => ks.map((k) => ({ id: `${m}#${k.slice(-6)}`, key: k, model: m }))); };
+const combos = (models: string[]): Combo[] => { const ks = allKeys(); return models.flatMap((m) => ks.map((k) => ({ id: `${m}#${k.slice(-6)}`, key: k, model: m }))); };
 const sleepUntil = new Map<string, number>();   // combo id -> epoch ms when it may be used again
 const FOREVER = Number.MAX_SAFE_INTEGER;
 
@@ -48,16 +48,16 @@ function requireKey() {
   if (!GEMINI_PROXY_URL && allKeys().length === 0) throw makeError('NO_API_KEY', 'GEMINI_API_KEY is empty in this build');
 }
 
-function nextCombo(): Combo | null {
+function nextCombo(models: string[]): Combo | null {
   const now = Date.now();
-  return combos().find((c) => (sleepUntil.get(c.id) ?? 0) <= now) ?? null;
+  return combos(models).find((c) => (sleepUntil.get(c.id) ?? 0) <= now) ?? null;
 }
 
 /** Runs fn with the first usable (model, key); on quota / overload / retired model, moves to the next. */
-async function withModelFallback<T>(fn: (c: Combo) => Promise<T>): Promise<T> {
+async function withModelFallback<T>(fn: (c: Combo) => Promise<T>, models: string[] = FAST_FIRST): Promise<T> {
   let lastErr: unknown;
   for (;;) {
-    const c = nextCombo();
+    const c = nextCombo(models);
     if (!c) throw makeError('QUOTA_EXCEEDED', lastErr ? errText(lastErr) : 'All Gemini models/keys are rate-limited');
     try { return await fn(c); }
     catch (e) {
@@ -121,7 +121,7 @@ export async function parseCommand(text: string, context?: string, attempts = 3)
   let lastError: unknown;
   for (let i = 0; i < attempts; i++) {
     try {
-      const raw = await withTimeout(callModel(text, context), 30000);
+      const raw = await withTimeout(callModel(text, context), 12000);
       const intent = validateIntent(JSON.parse(raw));
       remember(text, raw);
       return intent;
@@ -174,7 +174,7 @@ async function callAgentModel(prompt: string, imageBase64: string | null): Promi
   return withModelFallback(async (c) => {
     const result = await getAgentModel(c).generateContent({ contents: [{ role: 'user', parts }] });
     return result.response.text();
-  });
+  }, SMART_FIRST);
 }
 
 /** Asks Gemini for the next single action. Retries on network / parse errors. */
@@ -184,7 +184,7 @@ export async function decideNextStep(
   let lastError: unknown;
   for (let i = 0; i < attempts; i++) {
     try {
-      const raw = await withTimeout(callAgentModel(prompt, imageBase64), 25000);
+      const raw = await withTimeout(callAgentModel(prompt, imageBase64), 16000);
       return validateAgentStep(JSON.parse(raw), screenCount);
     } catch (e) {
       if (['NO_API_KEY', 'QUOTA_EXCEEDED'].includes((e as { code?: string })?.code ?? '')) throw e;

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Modal, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Text } from './Txt';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { setRuntimeKeys } from '../services/gemini';
 import { glow, Palette } from '../theme';
@@ -30,7 +31,7 @@ export default function KeyModal({ visible, palette, locale, onClose }: { visibl
           </Text>
           <TextInput value={text} onChangeText={setText} multiline autoCapitalize="none" autoCorrect={false}
             placeholder="AIza..." placeholderTextColor="#555"
-            style={[styles.input, { color: palette.text, borderColor: palette.border }]} />
+            style={[styles.input, { color: palette.text, borderColor: palette.border, fontFamily: 'Rajdhani-Medium' }]} />
           <View style={styles.row}>
             <Pressable onPress={onClose} style={[styles.btn, { borderColor: palette.border }]}><Text style={{ color: palette.text }}>{si ? 'වසන්න' : 'Close'}</Text></Pressable>
             <Pressable onPress={save} style={[styles.btn, { backgroundColor: glow.rose, borderColor: glow.rose }]}>

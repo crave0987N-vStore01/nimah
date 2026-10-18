@@ -63,6 +63,16 @@ export async function executeIntent(intent: Intent, ctx: ActionContext): Promise
     return t(ctx.locale, r === 'on' ? 'a11yAlready' : r === 'auto' ? 'a11yAuto' : 'a11yManual');
   }
   const handler = handlers[intent.action];
-  if (handler) await handler(intent, ctx);
+  if (handler) {
+    try { await handler(intent, ctx); }
+    catch (e: any) {
+      // Unknown app name: let the AI look for it (app drawer / search) instead of giving up.
+      if (intent.action === 'open_app' && e?.code === 'APP_NOT_FOUND' && ctx.fullControl) {
+        const res = await runAgent(`Open the app called "${intent.target}" (look for it in the app list or search for it).`, { ...ctx.agent, locale: ctx.locale });
+        return res.reply;
+      }
+      throw e;
+    }
+  }
   return intent.spoken_reply; // for "unknown" this is Gemini's clarifying question
 }

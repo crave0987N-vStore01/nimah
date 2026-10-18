@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
+import { Animated, Easing, StyleSheet, View } from 'react-native';
+import { Text } from './Txt';
 
 /** Fades + slides its children in whenever it mounts (or `trigger` changes). */
 export function FadeInUp({ children, trigger, delay = 0, style }: { children: React.ReactNode; trigger?: unknown; delay?: number; style?: any }) {

@@ -1,5 +1,6 @@
 import React from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Switch, TextInput, View } from 'react-native';
+import { Text } from './Txt';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { t } from '../i18n';
 import { Nimah } from '../native/Nimah';
@@ -21,7 +22,7 @@ function Segmented<T extends string | number>(
         const on = o.value === value;
         return (
           <Pressable key={String(o.value)} onPress={() => onChange(o.value)}
-            style={[styles.segItem, { borderColor: palette.border, backgroundColor: on ? '#E11D48' : palette.card }]}>
+            style={[styles.segItem, { borderColor: palette.border, backgroundColor: on ? '#C4141C' : palette.card }]}>
             <Text style={{ color: on ? '#fff' : palette.text }}>{o.label}</Text>
           </Pressable>
         );
@@ -65,13 +66,13 @@ export default function SettingsModal({ visible, settings: s, palette, onChange,
               options={[{ label: t(L, 'system'), value: 'system' }, { label: t(L, 'dark'), value: 'dark' }, { label: t(L, 'light'), value: 'light' }]} />
           </Row>
           {([
-            ['autoListen', 'autoListen'], ['speakReplies', 'speakReplies'], ['fullControl', 'fullControl'], ['confirmRisky', 'confirmRisky'],
+            ['autoListen', 'autoListen'], ['askBack', 'askBack'], ['speakReplies', 'speakReplies'], ['fullControl', 'fullControl'], ['confirmRisky', 'confirmRisky'],
             ['autoSend', 'autoSend'], ['backgroundService', 'background'],
           ] as const).map(([field, label]) => (
             <View key={field} style={styles.switchRow}>
               <Text style={{ color: palette.text, fontSize: 16 }}>{t(L, label)}</Text>
               <Switch value={s[field]} onValueChange={(v) => onChange({ [field]: v })}
-                trackColor={{ false: '#3A262B', true: '#B3173A' }} thumbColor={s[field] ? '#F5D9A6' : '#9A8388'} />
+                trackColor={{ false: '#2A1B1C', true: '#8E0F15' }} thumbColor={s[field] ? '#E9DDD7' : '#8A7F7C'} />
             </View>
           ))}
           <Pressable onPress={() => { Nimah.openAccessibilitySettings().catch(() => {}); }} style={[styles.btn, { borderColor: palette.border }]}>

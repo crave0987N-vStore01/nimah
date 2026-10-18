@@ -342,12 +342,18 @@ class NimahModule(private val rc: ReactApplicationContext) :
     @ReactMethod
     fun openApp(name: String, promise: Promise) {
         val pm = rc.packageManager
-        val q = name.trim().lowercase()
+        // Forgiving match: ignore case, spaces and punctuation ("tik tok" finds "TikTok").
+        fun norm(x: String) = x.lowercase().filter { it.isLetterOrDigit() }
+        val q = norm(name)
+        if (q.isEmpty()) { promise.reject("APP_NOT_FOUND", "No app name given"); return }
         val apps = pm.queryIntentActivities(
             Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0
-        ).map { it.activityInfo.packageName to it.loadLabel(pm).toString() }
-        val match = apps.firstOrNull { it.second.lowercase() == q }
-            ?: apps.firstOrNull { it.second.lowercase().contains(q) }
+        ).map { Triple(it.activityInfo.packageName, it.loadLabel(pm).toString(), norm(it.loadLabel(pm).toString())) }
+        val match = apps.firstOrNull { it.third == q }
+            ?: apps.firstOrNull { it.third.startsWith(q) }
+            ?: apps.firstOrNull { q.isNotEmpty() && it.third.contains(q) }
+            ?: apps.firstOrNull { q.isNotEmpty() && q.contains(it.third) && it.third.length >= 3 }
+            ?: apps.firstOrNull { q.isNotEmpty() && norm(it.first).contains(q) }
         val launchIntent = match?.let { pm.getLaunchIntentForPackage(it.first) }
         if (launchIntent != null && launch(launchIntent)) promise.resolve(true)
         else promise.reject("APP_NOT_FOUND", "No app named $name")

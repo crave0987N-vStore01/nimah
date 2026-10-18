@@ -29,7 +29,7 @@ export class ErrorBoundary extends React.Component<{ children: React.ReactNode }
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#12060A', padding: 20, paddingTop: 60 },
   title: { color: '#FF8FA3', fontSize: 22, fontWeight: '800' },
-  sub: { color: '#E3A6B2', marginTop: 6, marginBottom: 14 },
+  sub: { color: '#B9A9A5', marginTop: 6, marginBottom: 14 },
   box: { flex: 1, backgroundColor: '#1D0C12', borderRadius: 12, padding: 12 },
-  text: { color: '#FFF1F3', fontFamily: 'monospace', fontSize: 12 },
+  text: { color: '#F3EAE6', fontFamily: 'monospace', fontSize: 12 },
 });

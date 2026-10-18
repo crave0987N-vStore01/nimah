@@ -1,5 +1,6 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
+import { Text } from './Txt';
 import { t } from '../i18n';
 import { Palette } from '../theme';
 import { Choice, ChoiceRequest, Locale } from '../types';

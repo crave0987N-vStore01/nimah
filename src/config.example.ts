@@ -24,6 +24,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autoSend: false,          // hands-free Send (needs the accessibility service)
   fullControl: true,        // AI may operate any app to finish a spoken task
   confirmRisky: true,       // ask before payments / deleting / buying
+  askBack: true,            // Nimah greets you and asks "what next?" after each job
   autoListen: true,         // mic opens by itself when the app opens, and stays on
   maxSteps: 30,             // safety limit per task
 };

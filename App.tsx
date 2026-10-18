@@ -1,6 +1,7 @@
 // App.tsx — Nimah main screen: voice only. Crimson + gold, red-moon scenery, particle sphere.
 import React, { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StatusBar, StyleSheet, View } from 'react-native';
+import { Text } from './src/components/Txt';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import ChoiceSheet from './src/components/ChoiceSheet';
@@ -82,15 +83,15 @@ function Main() {
             <Logo />
             <View style={{ marginLeft: 12 }}>
               <Text style={styles.name}>Nimah</Text>
-              <Text style={styles.tag}>{si ? 'ඔබේ හඬ, ඔබේ ෆෝන් එක' : 'Your voice, your phone'}</Text>
+              <Text style={styles.tag}>VOICE ASSISTANCE</Text>
             </View>
           </View>
           <View style={styles.tools}>
             <Pressable onPress={() => setShowKey(true)} style={styles.tool} hitSlop={6} accessibilityRole="button" accessibilityLabel="API key">
-              <KeyIcon color="#F5D9A6" size={20} />
+              <KeyIcon color="#E9DDD7" size={20} />
             </Pressable>
             <Pressable onPress={() => setShowSettings(true)} style={styles.tool} hitSlop={6} accessibilityRole="button" accessibilityLabel={t(L, 'settings')}>
-              <SlidersIcon color="#F5D9A6" size={20} />
+              <SlidersIcon color="#E9DDD7" size={20} />
             </Pressable>
           </View>
         </FadeInUp>
@@ -99,15 +100,15 @@ function Main() {
           <Pressable onPress={() => ensureAccessibility(true).then((r) => r === 'auto' && setA11yOn(true)).catch(() => {})} style={styles.notice}>
             <View style={styles.noticeDot} />
             <Text style={styles.noticeTx}>
-              {si ? 'ෆෝන් පාලනය off. “Accessibility on කරන්න” කියන්න' : 'Phone control is off. Say “turn on accessibility”'}
+              {t(L, 'a11yHint')}
             </Text>
           </Pressable>
         )}
 
         <View style={styles.stage}>
           <View style={styles.orbBox}>
-            <View style={[styles.ring, { width: 296, height: 296, borderRadius: 148, borderColor: 'rgba(245,184,75,0.16)' }]} pointerEvents="none" />
-            <View style={[styles.ring, { width: 336, height: 336, borderRadius: 168, borderColor: 'rgba(255,77,109,0.10)' }]} pointerEvents="none" />
+            <View style={[styles.ring, { width: 296, height: 296, borderRadius: 148, borderColor: 'rgba(233,221,215,0.16)' }]} pointerEvents="none" />
+            <View style={[styles.ring, { width: 336, height: 336, borderRadius: 168, borderColor: 'rgba(255,42,42,0.10)' }]} pointerEvents="none" />
             <ParticleOrb status={a.status} level={a.level} />
           </View>
 
@@ -132,7 +133,7 @@ function Main() {
           )}
         </View>
 
-        <Footer color="#F5D9A6" />
+        <Footer color="#B9A9A5" />
       </SafeAreaView>
 
       <SettingsModal visible={showSettings} settings={settings} palette={palette}
@@ -150,25 +151,25 @@ const styles = StyleSheet.create({
   root: { flex: 1, paddingHorizontal: 22, paddingTop: 10 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   brand: { flexDirection: 'row', alignItems: 'center' },
-  name: { color: '#FFF1F3', fontSize: 25, fontFamily: 'serif', fontWeight: '600', letterSpacing: 0.4 },
-  tag: { color: 'rgba(245,217,166,0.82)', fontSize: 11, letterSpacing: 0.6, marginTop: 1 },
+  name: { color: '#F3EAE6', fontSize: 24, fontFamily: 'serif', fontWeight: '700', letterSpacing: 3 },
+  tag: { color: '#FF2A2A', fontSize: 10.5, letterSpacing: 3.2, marginTop: 1, fontWeight: '600' },
   tools: { flexDirection: 'row' },
-  tool: { width: 42, height: 42, borderRadius: 21, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(245,184,75,0.55)', marginLeft: 10, alignItems: 'center', justifyContent: 'center' },
+  tool: { width: 42, height: 42, borderRadius: 21, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(233,221,215,0.55)', marginLeft: 10, alignItems: 'center', justifyContent: 'center' },
   notice: { flexDirection: 'row', alignItems: 'center', marginTop: 14, paddingVertical: 8, paddingHorizontal: 12, borderLeftWidth: 2, borderLeftColor: glow.gold, backgroundColor: 'rgba(0,0,0,0.28)' },
   noticeDot: { width: 0, height: 0 },
-  noticeTx: { color: '#F5D9A6', fontSize: 12.5, flex: 1 },
+  noticeTx: { color: '#E9DDD7', fontSize: 12.5, flex: 1 },
   stage: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   orbBox: { alignItems: 'center', justifyContent: 'center', width: 340, height: 340 },
   ring: { position: 'absolute', borderWidth: StyleSheet.hairlineWidth },
   statusRow: { flexDirection: 'row', alignItems: 'center', marginTop: 2 },
   dot: { width: 6, height: 6, borderRadius: 3, marginRight: 10 },
-  statusTx: { color: '#FFF1F3', fontSize: 13, letterSpacing: 1.6, textTransform: 'uppercase', opacity: 0.92 },
+  statusTx: { color: '#F3EAE6', fontSize: 13, letterSpacing: 1.6, textTransform: 'uppercase', opacity: 0.92 },
   talk: { maxHeight: 150, alignSelf: 'stretch', marginTop: 16 },
   talkIn: { alignItems: 'center', paddingHorizontal: 10 },
-  progress: { color: 'rgba(245,217,166,0.8)', fontSize: 13, textAlign: 'center', marginBottom: 8 },
+  progress: { color: 'rgba(233,221,215,0.8)', fontSize: 13, textAlign: 'center', marginBottom: 8 },
   you: { color: glow.gold, fontSize: 14, textAlign: 'center', letterSpacing: 0.2, marginBottom: 8 },
-  reply: { color: '#FFF1F3', fontSize: 18, lineHeight: 26, fontFamily: 'serif', textAlign: 'center' },
-  err: { color: '#FCA5A5', fontSize: 13, textAlign: 'center', marginTop: 8 },
+  reply: { color: '#F3EAE6', fontSize: 18, lineHeight: 26, fontFamily: 'serif', textAlign: 'center' },
+  err: { color: '#FF8A80', fontSize: 13, textAlign: 'center', marginTop: 8 },
   stop: { marginTop: 14, borderWidth: 1, borderColor: glow.rose, borderRadius: 24, paddingVertical: 10, paddingHorizontal: 34 },
-  stopTx: { color: '#FFD6DD', fontSize: 14, letterSpacing: 1.5, textTransform: 'uppercase' },
+  stopTx: { color: '#F3EAE6', fontSize: 14, letterSpacing: 1.5, textTransform: 'uppercase' },
 });

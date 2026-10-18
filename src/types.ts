@@ -39,6 +39,8 @@ export interface Settings {
   confirmRisky: boolean;
   /** Mic opens by itself when the app opens and keeps listening (no button). */
   autoListen: boolean;
+  /** After each job, Nimah asks what to do next (and greets you when the app opens). */
+  askBack: boolean;
   maxSteps: number;
 }
 

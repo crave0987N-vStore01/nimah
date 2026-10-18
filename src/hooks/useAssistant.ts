@@ -1,13 +1,14 @@
 // src/hooks/useAssistant.ts
 // Orchestrates: mic -> speech -> Gemini -> action (or AI agent) -> spoken reply.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Animated } from 'react-native';
+import { Animated, AppState } from 'react-native';
 import { errorMessage, t } from '../i18n';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ensureAccessibility, Nimah, requestPermissions } from '../native/Nimah';
 import { executeIntent } from '../services/actions';
 import { matchChoice } from '../services/contacts';
 import { parseCommand, resetConversation } from '../services/gemini';
+import { quickIntent } from '../services/quick';
 import { parseYesNo } from '../services/yesno';
 import { Choice, ChoiceRequest, HistoryItem, Intent, Settings, Status } from '../types';
 
@@ -39,6 +40,7 @@ export function useAssistant(settings: Settings, onHistory: (h: HistoryEntry) =>
   const busyRef = useRef(false);                          // true while a command / agent task runs
   const cancelRef = useRef(false);
   const followUps = useRef(0);
+  const greetPending = useRef(false);                      // next thing the user says answers "How are you?"
   const failRef = useRef(0);                               // consecutive mic failures (for back-off)
   const micBlockedRef = useRef(false);                     // permission refused -> stop auto-listening
   const [kick, setKick] = useState(0);                  // forces the auto-listen effect to re-run
@@ -127,13 +129,23 @@ export function useAssistant(settings: Settings, onHistory: (h: HistoryEntry) =>
     let parsed: Intent | null = null;
     let startedService = false;
     try {
-      const info = await Nimah.deviceInfo().catch(() => null);
-      const front = await Nimah.screenRead().then((sc) => sc.package).catch(() => null);
-      const context = [
-        info ? `Device info: ${info.date}, ${info.time}, battery ${info.battery}%${info.charging ? ' (charging)' : ''}` : '',
-        front && front !== 'unknown' ? `App currently on screen: ${front}` : '',
-      ].filter(Boolean).join('. ') || undefined;
-      parsed = await parseCommand(text, context);
+      const answeringGreeting = greetPending.current;
+      greetPending.current = false;
+      // Simple commands ("open tiktok", "torch on") are understood on the phone itself: no network wait.
+      const quick = answeringGreeting ? null : quickIntent(text, s.locale);
+      if (quick) parsed = quick;
+      else {
+        const [info, front] = await Promise.all([
+          Nimah.deviceInfo().catch(() => null),
+          Nimah.screenRead().then((sc) => sc.package).catch(() => null),
+        ]);
+        const context = [
+          info ? `Device info: ${info.date}, ${info.time}, battery ${info.battery}%${info.charging ? ' (charging)' : ''}` : '',
+          front && front !== 'unknown' ? `App currently on screen: ${front}` : '',
+          answeringGreeting ? 'The user is replying to your greeting "Hello! How are you?". Answer warmly in ONE short sentence (action "answer") and ask what they need.' : '',
+        ].filter(Boolean).join('. ') || undefined;
+        parsed = await parseCommand(text, context);
+      }
       setIntent(parsed);
 
       if (parsed.action === 'phone_task') {
@@ -155,7 +167,10 @@ export function useAssistant(settings: Settings, onHistory: (h: HistoryEntry) =>
       busyRef.current = false;
       if (reply.trim() === '...') { setIntent(null); setTranscript(''); restStatus(); return; } // chatter: stay silent
       onHistory({ transcript: text, action: parsed.action, summary: reply, ok: parsed.action !== 'unknown' });
-      await say(reply);
+      // Keep the conversation going: ask what to do next (not after a cancelled / failed / question turn),
+      // spoken as ONE sentence so there is no pause between the answer and the question.
+      const follow = s.askBack && parsed.action !== 'unknown' && !cancelRef.current;
+      await say(follow ? `${reply} ${t(s.locale, 'anythingElse')}` : reply);
 
       // Assistant asked a question -> listen for the answer without another tap.
       if (parsed.action === 'unknown' && followUps.current < 2 && !cancelRef.current) {
@@ -264,9 +279,7 @@ export function useAssistant(settings: Settings, onHistory: (h: HistoryEntry) =>
   // ---- first-run setup: switch phone control on by itself when possible, keep Nimah alive in the background ----
   useEffect(() => {
     if (!settings.fullControl) return;
-    ensureAccessibility(false).then((r) => {
-      if (r === 'manual') hint(t(settingsRef.current.locale, 'a11yHint'));
-    }).catch(() => {});
+    ensureAccessibility(false).catch(() => {});
     AsyncStorage.getItem('nimah.battery.asked').then((v) => {
       if (v) return;
       AsyncStorage.setItem('nimah.battery.asked', '1').catch(() => {});
@@ -276,6 +289,8 @@ export function useAssistant(settings: Settings, onHistory: (h: HistoryEntry) =>
 
   // ---- ALWAYS LISTENING: the mic opens by itself and re-opens after every command ---------
   const permAsked = useRef(false);
+  const greeted = useRef(false);
+  const lastGreetAt = useRef(0);
   useEffect(() => {
     if (!settings.autoListen) return undefined;
     if (status !== 'idle' || busyRef.current || choiceRef.current || askRef.current || micBlockedRef.current) return undefined;
@@ -287,10 +302,27 @@ export function useAssistant(settings: Settings, onHistory: (h: HistoryEntry) =>
         const perms = await requestPermissions();
         if (!perms.mic) { micBlockedRef.current = true; setError(errorMessage(settingsRef.current.locale, 'NO_MIC_PERMISSION')); return; }
       }
+      if (statusRef.current === 'idle' && !busyRef.current && settingsRef.current.askBack && !greeted.current) {
+        greeted.current = true;                       // greet as a spoken question, then wait for the answer
+        lastGreetAt.current = Date.now();
+        greetPending.current = settingsRef.current.speakReplies;
+        await say(t(settingsRef.current.locale, 'greet'));
+      }
       if (statusRef.current === 'idle' && !busyRef.current) await listen();
     }, delay);
     return () => clearTimeout(id);
   }, [settings.autoListen, status, kick, listen]);
+
+  // Greet again every time the app is opened (brought to the front) - but not more than once a minute.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (st) => {
+      if (st === 'active' && settingsRef.current.askBack && Date.now() - lastGreetAt.current > 60_000) {
+        greeted.current = false;
+        setKick((k) => k + 1);
+      }
+    });
+    return () => sub.remove();
+  }, []);
 
   // Turning "always listening" off -> stop the mic.
   useEffect(() => {

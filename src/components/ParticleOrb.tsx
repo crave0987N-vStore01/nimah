@@ -84,7 +84,7 @@ const styles = StyleSheet.create({
   wrap: { width: SIZE, height: SIZE, alignItems: 'center', justifyContent: 'center' },
   abs: { position: 'absolute', width: SIZE, height: SIZE },
   sphere: { width: SIZE, height: SIZE },
-  glow: { position: 'absolute', width: SIZE * 0.8, height: SIZE * 0.8, borderRadius: SIZE, backgroundColor: 'rgba(225,29,72,0.07)' },
-  coreHalo: { position: 'absolute', left: SIZE / 2 - 26, top: SIZE / 2 - 26, width: 52, height: 52, borderRadius: 26, backgroundColor: 'rgba(255,122,69,0.22)' },
-  core: { position: 'absolute', left: SIZE / 2 - 17, top: SIZE / 2 - 17, width: 34, height: 34, borderRadius: 17, borderWidth: 2, borderColor: glow.gold, backgroundColor: 'rgba(225,29,72,0.55)' },
+  glow: { position: 'absolute', width: SIZE * 0.8, height: SIZE * 0.8, borderRadius: SIZE, backgroundColor: 'rgba(209,18,27,0.07)' },
+  coreHalo: { position: 'absolute', left: SIZE / 2 - 26, top: SIZE / 2 - 26, width: 52, height: 52, borderRadius: 26, backgroundColor: 'rgba(255,90,31,0.22)' },
+  core: { position: 'absolute', left: SIZE / 2 - 17, top: SIZE / 2 - 17, width: 34, height: 34, borderRadius: 17, borderWidth: 2, borderColor: glow.gold, backgroundColor: 'rgba(209,18,27,0.55)' },
 });

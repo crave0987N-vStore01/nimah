@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef } from 'react';
 import { Animated, Dimensions, Easing, ImageBackground, StyleSheet, View } from 'react-native';
 
 const { width: W, height: H } = Dimensions.get('window');
-const COLORS = ['#FF4D6D', '#FF7A93', '#FF2E63', '#FFB3C1', '#E11D48'];
+const COLORS = ['#FF2A2A', '#D1121B', '#9E0F16', '#FF5A1F', '#C4141C'];
 
 // small deterministic pseudo-random so petals look natural but do not jump on re-render
 const rnd = (i: number, k: number) => { const x = Math.sin(i * 127.1 + k * 311.7) * 43758.5453; return x - Math.floor(x); };

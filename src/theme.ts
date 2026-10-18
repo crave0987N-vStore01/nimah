@@ -1,20 +1,18 @@
 import { useColorScheme } from 'react-native';
 import { Settings, Status } from './types';
 
-export const accent = {
-  violet: '#8B5CF6', indigo: '#6366F1', cyan: '#22D3EE', pink: '#F472B6', green: '#34D399', amber: '#FBBF24', rose: '#FB7185',
-};
+export const accent = { red: '#FF2A2A', crimson: '#C4141C', ember: '#FF5A1F', bone: '#E9DDD7', ash: '#8A7F7C' };
 
-export const glow = { red: '#E11D48', rose: '#FF4D6D', gold: '#F5B84B', ember: '#FF7A45', line: 'rgba(255,92,124,0.30)' };
+export const glow = { red: '#C4141C', rose: '#FF2A2A', gold: '#E9DDD7', ember: '#FF5A1F', line: 'rgba(255,42,42,0.30)' };
 
 export const palettes = {
-  dark: { bg: '#0A0508', card: 'rgba(24,7,12,0.92)', text: '#FFF1F3', sub: '#E3A6B2', border: 'rgba(255,92,124,0.32)', ok: '#F5B84B', err: '#FCA5A5', glass: 'rgba(255,255,255,0.09)' },
+  dark: { bg: '#0A0508', card: 'rgba(12,5,6,0.94)', text: '#F3EAE6', sub: '#B9A9A5', border: 'rgba(255,42,42,0.30)', ok: '#E9DDD7', err: '#FF8A80', glass: 'rgba(255,255,255,0.09)' },
   light: { bg: '#F4F6FF', card: '#FFFFFF', text: '#0F172A', sub: '#5B6B8C', border: '#E1E7F5', ok: '#15803D', err: '#B91C1C', glass: 'rgba(15,23,42,0.04)' },
 };
 export type Palette = typeof palettes.dark;
 
 export const statusColor: Record<Status, string> = {
-  idle: '#FF4D6D', listening: '#F5B84B', processing: '#FF7A45', speaking: '#FF2E63',
+  idle: '#C4141C', listening: '#FF2A2A', processing: '#FF5A1F', speaking: '#E9DDD7',
 };
 export const STATUS_ORDER: Status[] = ['idle', 'listening', 'processing', 'speaking'];
 
