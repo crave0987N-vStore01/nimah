@@ -1,7 +1,7 @@
 // src/services/actions.ts — maps a validated Intent to native calls.
 import { makeError } from '../errors';
 import { t } from '../i18n';
-import { Nimah } from '../native/Nimah';
+import { ensureAccessibility, Nimah } from '../native/Nimah';
 import { Choice, Intent, Locale } from '../types';
 import { AgentHooks, runAgent } from './agent';
 import { ContactGroup, groupContacts, looksLikeNumber } from './contacts';
@@ -57,6 +57,10 @@ export async function executeIntent(intent: Intent, ctx: ActionContext): Promise
     if (!ctx.fullControl) return t(ctx.locale, 'errA11y');
     const res = await runAgent(intent.target!, { ...ctx.agent, locale: ctx.locale });
     return res.reply;
+  }
+  if (intent.action === 'enable_accessibility') {
+    const r = await ensureAccessibility(true);
+    return t(ctx.locale, r === 'on' ? 'a11yAlready' : r === 'auto' ? 'a11yAuto' : 'a11yManual');
   }
   const handler = handlers[intent.action];
   if (handler) await handler(intent, ctx);

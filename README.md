@@ -4,6 +4,11 @@ You only **speak**. The AI does everything else — it looks at the screen, taps
 
 Flow: **mic → Android SpeechRecognizer → Gemini intent parser → fast action _or_ the AI agent loop (screen → Gemini → tap/type/scroll → repeat) → spoken reply**
 
+## fix5 (latest)
+- **429 "quota exceeded" fixed**: Nimah now rotates through several Gemini models (`gemini-flash-latest` → flash-lite → 2.5 …) and any extra keys (`GEMINI_API_KEYS`, GitHub secrets `GEMINI_API_KEY_2/3`). A model that hits its quota sleeps for ~1 min and the next one is used automatically.
+- **No mic button**: the mic opens by itself when the app opens and re-opens after every command (Settings → *Always listening*). A foreground service keeps it alive while YouTube / other apps are in front.
+- **Talk inside any app**: say "YouTube open කරන්න", then (while YouTube is open) "search bar එකේ lofi songs search කරන්න" — the AI works in the app that is on screen.
+
 ## What's new in v3
 | Feature | Where |
 |---|---|

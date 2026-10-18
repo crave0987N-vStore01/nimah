@@ -271,6 +271,44 @@ class NimahModule(private val rc: ReactApplicationContext) :
         if (ok) promise.resolve(true) else promise.reject("NO_SETTINGS", "Cannot open settings")
     }
 
+    /**
+     * Turns the Nimah accessibility + notification services ON by itself (no tapping) — possible only after the
+     * one-time grant:  adb shell pm grant com.nimah android.permission.WRITE_SECURE_SETTINGS
+     * Resolves true when the accessibility service is on afterwards, false when the person must switch it on manually.
+     */
+    @ReactMethod
+    fun enableAccessibilityService(promise: Promise) {
+        try {
+            if (NimahAccessibilityService.isEnabled(rc)) { promise.resolve(true); return }
+            if (!granted("android.permission.WRITE_SECURE_SETTINGS")) { promise.resolve(false); return }
+            val cr = rc.contentResolver
+            fun addTo(key: String, component: String) {
+                val cur = android.provider.Settings.Secure.getString(cr, key).orEmpty()
+                if (cur.split(':').any { it.equals(component, ignoreCase = true) }) return
+                val next = if (cur.isBlank()) component else "$cur:$component"
+                android.provider.Settings.Secure.putString(cr, key, next)
+            }
+            addTo("enabled_accessibility_services", "${rc.packageName}/${rc.packageName}.NimahAccessibilityService")
+            android.provider.Settings.Secure.putInt(cr, "accessibility_enabled", 1)
+            try { addTo("enabled_notification_listeners", "${rc.packageName}/${rc.packageName}.NimahNotificationService") } catch (_: Exception) {}
+            promise.resolve(true)
+        } catch (e: Exception) { promise.resolve(false) }
+    }
+
+    @ReactMethod
+    fun canWriteSecureSettings(promise: Promise) { promise.resolve(granted("android.permission.WRITE_SECURE_SETTINGS")) }
+
+    /** Asks Android not to kill Nimah in the background (shows a system dialog once). */
+    @ReactMethod
+    fun requestIgnoreBatteryOptimizations(promise: Promise) {
+        try {
+            val pm = rc.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+            if (pm.isIgnoringBatteryOptimizations(rc.packageName)) { promise.resolve(true); return }
+            val i = Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${rc.packageName}"))
+            promise.resolve(launch(i))
+        } catch (e: Exception) { promise.resolve(false) }
+    }
+
     /** Places the call if CALL_PHONE is granted, otherwise opens the dialer. */
     @ReactMethod
     fun callNumber(phone: String, countryCode: String, promise: Promise) {

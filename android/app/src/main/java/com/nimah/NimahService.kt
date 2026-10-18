@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 
 /**
@@ -18,7 +19,21 @@ import androidx.core.app.NotificationCompat
  */
 class NimahService : Service() {
 
+    private var wake: PowerManager.WakeLock? = null
+
     override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        // keep the CPU awake so listening continues with the screen off / other apps in front
+        wake = (getSystemService(POWER_SERVICE) as PowerManager)
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "nimah:listening").apply { setReferenceCounted(false); acquire() }
+    }
+
+    override fun onDestroy() {
+        wake?.let { if (it.isHeld) it.release() }
+        super.onDestroy()
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val notification = buildNotification()
@@ -38,8 +53,8 @@ class NimahService : Service() {
         val open = packageManager.getLaunchIntentForPackage(packageName)
         val pending = PendingIntent.getActivity(this, 0, open, PendingIntent.FLAG_IMMUTABLE)
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Nimah is ready")
-            .setContentText("Nimah is ready")
+            .setContentTitle("Nimah is listening")
+            .setContentText("Say a command — works in any app")
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentIntent(pending)
             .setOngoing(true)

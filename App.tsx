@@ -1,23 +1,25 @@
-// App.tsx — Nimah main screen.
-import React, { useState } from 'react';
+// App.tsx — Nimah main screen: voice only. Crimson + gold, red-moon scenery, particle sphere.
+import React, { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import ChoiceSheet from './src/components/ChoiceSheet';
-import HistoryModal from './src/components/HistoryModal';
-import SettingsModal from './src/components/SettingsModal';
-import { Dots, FadeInUp, RotatingHint } from './src/components/Bits';
 import Footer from './src/components/Footer';
+import { KeyIcon, SlidersIcon } from './src/components/Icons';
+import KeyModal, { KEYS_STORAGE } from './src/components/KeyModal';
 import Logo from './src/components/Logo';
-import Orb from './src/components/Orb';
+import ParticleOrb from './src/components/ParticleOrb';
 import Scenery from './src/components/Scenery';
-import Waveform from './src/components/Waveform';
+import SettingsModal from './src/components/SettingsModal';
+import { FadeInUp } from './src/components/Bits';
 import { useAssistant } from './src/hooks/useAssistant';
 import { useHistory } from './src/hooks/useHistory';
 import { SettingsProvider, useSettings } from './src/hooks/useSettings';
 import { t } from './src/i18n';
-import { Nimah } from './src/native/Nimah';
+import { ensureAccessibility, Nimah } from './src/native/Nimah';
+import { setRuntimeKeys } from './src/services/gemini';
+import { glow, palettes, statusColor } from './src/theme';
 import { Settings } from './src/types';
-import { accent, statusColor, useTheme } from './src/theme';
 
 export default function App() {
   return (
@@ -33,146 +35,140 @@ function Main() {
   const { settings, update, ready } = useSettings();
   const history = useHistory();
   const a = useAssistant(settings, history.add);
-  // The red-moon wallpaper is dark, so the main screen always uses the dark palette.
-  const { palette } = useTheme('dark');
-  const isDark = true;
+  const palette = palettes.dark;
   const [showSettings, setShowSettings] = useState(false);
-  const [showHistory, setShowHistory] = useState(false);
-  if (!ready) return null; // wait for persisted settings
+  const [showKey, setShowKey] = useState(false);
+  const [a11yOn, setA11yOn] = useState(true);
 
-  // Turning on Auto-send: if the accessibility service is off, jump to Android's settings to enable "Nimah".
+  useEffect(() => {
+    AsyncStorage.getItem(KEYS_STORAGE).then((v) => { if (v) setRuntimeKeys(JSON.parse(v)); }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const check = () => Nimah.isAutoSendEnabled().then(setA11yOn).catch(() => {});
+    check();
+    const id = setInterval(check, 3000);
+    return () => clearInterval(id);
+  }, []);
+
+  if (!ready) return null;
+
   const onSettingsChange = (patch: Partial<Settings>) => {
     update(patch);
-    if (patch.autoSend || patch.fullControl) {
-      Nimah.isAutoSendEnabled()
-        .then((on) => { if (!on) Nimah.openAccessibilitySettings(); })
-        .catch(() => {});
-    }
+    if (patch.autoSend || patch.fullControl) ensureAccessibility(true).catch(() => {});
   };
 
   const L = settings.locale;
-  const labels = {
-    idle: t(L, 'tapToSpeak'), listening: t(L, 'listening'),
-    processing: t(L, 'processing'), speaking: t(L, 'speaking'),
-  };
-  const examples = L === 'si-LK'
-    ? ['“Wi-Fi off කරන්න”', '“අසංක ට WhatsApp එකක් යවන්න”', '“උදේ 6 ට alarm එකක් දාන්න”', '“මගේ notifications කියවන්න”', '“YouTube එකේ lofi play කරන්න”']
-    : ['“Turn off Wi-Fi”', '“Send WhatsApp to Asanka: come tomorrow”', '“Set an alarm for 6 am”', '“Read my notifications”', '“Play lofi on YouTube”'];
-  const statusText = a.agentRunning ? t(L, 'working') : labels[a.status];
-  const sc = statusColor[a.status];
+  const si = L === 'si-LK';
+  const label = (a.agentRunning ? t(L, 'working')
+    : a.status === 'listening' ? t(L, 'listening')
+    : a.status === 'processing' ? t(L, 'processing')
+    : a.status === 'speaking' ? t(L, 'speaking')
+    : settings.autoListen ? (si ? 'කතා කරන්න' : 'Go ahead, I am listening') : (si ? 'නිහඬයි' : 'Listening is off'));
+  const tone = a.agentRunning ? statusColor.processing : statusColor[a.status];
+  const reply = a.intent?.spoken_reply && a.intent.spoken_reply !== '...' ? a.intent.spoken_reply : '';
 
   return (
     <View style={styles.screen}>
-    <Scenery />
-    <View style={styles.shade} pointerEvents="none" />
-    <SafeAreaView style={styles.root}>
-      <StatusBar barStyle="light-content" />
+      <Scenery />
+      <View style={styles.shade} pointerEvents="none" />
+      <View style={styles.shadeTop} pointerEvents="none" />
+      <View style={styles.shadeBottom} pointerEvents="none" />
+      <SafeAreaView style={styles.root}>
+        <StatusBar barStyle="light-content" />
 
-      <FadeInUp style={styles.header}>
-        <View style={styles.brand}>
-          <Logo />
-          <View>
-            <Text style={[styles.title, { color: palette.text }]}>Nimah</Text>
-            <Text style={[styles.tag, { color: accent.pink }]}>{L === 'si-LK' ? 'ඔබේ හඬ ෆෝන් සහායක' : 'Your voice, your phone'}</Text>
+        <FadeInUp style={styles.header}>
+          <View style={styles.brand}>
+            <Logo />
+            <View style={{ marginLeft: 12 }}>
+              <Text style={styles.name}>Nimah</Text>
+              <Text style={styles.tag}>{si ? 'ඔබේ හඬ, ඔබේ ෆෝන් එක' : 'Your voice, your phone'}</Text>
+            </View>
           </View>
-        </View>
-        <View style={styles.pills}>
-          <Pressable onPress={() => setShowHistory(true)} style={[styles.pill, { backgroundColor: palette.glass, borderColor: palette.border }]}>
-            <Text style={{ color: palette.text, fontSize: 13 }}>🕘 {t(L, 'history')}</Text>
-          </Pressable>
-          <Pressable onPress={() => setShowSettings(true)} style={[styles.pill, { backgroundColor: palette.glass, borderColor: palette.border }]}>
-            <Text style={{ color: palette.text, fontSize: 13 }}>⚙️ {t(L, 'settings')}</Text>
-          </Pressable>
-        </View>
-      </FadeInUp>
-
-      <View style={styles.hintBox}><RotatingHint items={examples} color={palette.sub} /></View>
-
-      <View style={styles.center}>
-        <Orb status={a.status} level={a.level} onPress={a.onMicPress} label={statusText} />
-        <View style={styles.waveBox}>
-          <Waveform level={a.level} active={a.status === 'listening'} color={sc} />
-        </View>
-        <FadeInUp trigger={statusText} style={styles.statusBox}>
-          <Text style={[styles.status, { color: palette.text }]}>{statusText}</Text>
-        </FadeInUp>
-        {(a.status === 'processing' || a.agentRunning) && !a.progress && <Dots color={sc} />}
-        {!!a.progress && (
-          <FadeInUp trigger={a.progress}>
-            <Text style={[styles.progress, { color: palette.sub }]} numberOfLines={3}>{a.progress}</Text>
-          </FadeInUp>
-        )}
-        {a.agentRunning && (
-          <FadeInUp>
-            <Pressable onPress={a.stopTask} style={[styles.stop, { backgroundColor: palette.err }]}
-              accessibilityRole="button" accessibilityLabel={t(L, 'stopTask')}>
-              <Text style={styles.stopText}>■ {t(L, 'stopTask')}</Text>
+          <View style={styles.tools}>
+            <Pressable onPress={() => setShowKey(true)} style={styles.tool} hitSlop={6} accessibilityRole="button" accessibilityLabel="API key">
+              <KeyIcon color="#F5D9A6" size={20} />
             </Pressable>
-          </FadeInUp>
+            <Pressable onPress={() => setShowSettings(true)} style={styles.tool} hitSlop={6} accessibilityRole="button" accessibilityLabel={t(L, 'settings')}>
+              <SlidersIcon color="#F5D9A6" size={20} />
+            </Pressable>
+          </View>
+        </FadeInUp>
+
+        {!a11yOn && settings.fullControl && (
+          <Pressable onPress={() => ensureAccessibility(true).then((r) => r === 'auto' && setA11yOn(true)).catch(() => {})} style={styles.notice}>
+            <View style={styles.noticeDot} />
+            <Text style={styles.noticeTx}>
+              {si ? 'ෆෝන් පාලනය off. “Accessibility on කරන්න” කියන්න' : 'Phone control is off. Say “turn on accessibility”'}
+            </Text>
+          </Pressable>
         )}
-      </View>
 
-      {a.choice && <FadeInUp trigger={a.choice.prompt}><ChoiceSheet request={a.choice} palette={palette} locale={L} onPick={a.settleChoice} /></FadeInUp>}
+        <View style={styles.stage}>
+          <View style={styles.orbBox}>
+            <View style={[styles.ring, { width: 296, height: 296, borderRadius: 148, borderColor: 'rgba(245,184,75,0.16)' }]} pointerEvents="none" />
+            <View style={[styles.ring, { width: 336, height: 336, borderRadius: 168, borderColor: 'rgba(255,77,109,0.10)' }]} pointerEvents="none" />
+            <ParticleOrb status={a.status} level={a.level} />
+          </View>
 
-      {(!!a.transcript || !!a.intent || !!a.error) && (
-        <ScrollView style={styles.chat} showsVerticalScrollIndicator={false}>
-          {!!a.transcript && (
-            <FadeInUp trigger={a.transcript} style={styles.rowRight}>
-              <View style={[styles.bubble, styles.me, { backgroundColor: '#E11D48' }]}>
-                <Text style={styles.meText}>{a.transcript}</Text>
-              </View>
-            </FadeInUp>
+          <FadeInUp trigger={label} style={styles.statusRow}>
+            <View style={[styles.dot, { backgroundColor: tone }]} />
+            <Text style={styles.statusTx}>{label}</Text>
+          </FadeInUp>
+
+          <ScrollView style={styles.talk} contentContainerStyle={styles.talkIn} showsVerticalScrollIndicator={false}>
+            {!!a.progress && <Text style={styles.progress}>{a.progress}</Text>}
+            {!!a.transcript && <Text style={styles.you}>{a.transcript}</Text>}
+            {!!reply && <FadeInUp trigger={reply}><Text style={styles.reply}>{reply}</Text></FadeInUp>}
+            {!!a.error && <Text style={styles.err}>{a.error}</Text>}
+          </ScrollView>
+
+          {a.choice && <FadeInUp trigger={a.choice.prompt} style={{ alignSelf: 'stretch' }}><ChoiceSheet request={a.choice} palette={palette} locale={L} onPick={a.settleChoice} /></FadeInUp>}
+
+          {a.agentRunning && (
+            <Pressable onPress={a.stopTask} style={styles.stop} accessibilityRole="button" accessibilityLabel={t(L, 'stopTask')}>
+              <Text style={styles.stopTx}>{t(L, 'stopTask')}</Text>
+            </Pressable>
           )}
-          {!!a.intent && (
-            <FadeInUp trigger={a.intent.spoken_reply + a.intent.action} style={styles.rowLeft}>
-              <View style={[styles.bubble, { backgroundColor: palette.card, borderColor: palette.border, borderWidth: 1 }]}>
-                <View style={[styles.chip, { backgroundColor: palette.glass, borderColor: accent.pink }]}>
-                  <Text style={{ color: accent.pink, fontSize: 11, fontWeight: '700' }}>{a.intent.action.replace('_', ' ').toUpperCase()}</Text>
-                </View>
-                {!!a.intent.spoken_reply && <Text style={{ color: palette.text, fontSize: 15, marginTop: 6 }}>{a.intent.spoken_reply}</Text>}
-              </View>
-            </FadeInUp>
-          )}
-          {!!a.error && <FadeInUp trigger={a.error}><Text style={{ color: palette.err, marginTop: 8, textAlign: 'center' }}>{a.error}</Text></FadeInUp>}
-        </ScrollView>
-      )}
+        </View>
 
-      <Text style={[styles.stopHint, { color: palette.sub }]}>{t(L, 'stopHint')}</Text>
-      <Footer color={palette.sub} />
+        <Footer color="#F5D9A6" />
+      </SafeAreaView>
 
       <SettingsModal visible={showSettings} settings={settings} palette={palette}
         onChange={onSettingsChange} onNewConversation={a.newConversation} onClose={() => setShowSettings(false)} />
-      <HistoryModal visible={showHistory} items={history.items} palette={palette} locale={L}
-        onClear={history.clear} onClose={() => setShowHistory(false)} />
-    </SafeAreaView>
+      <KeyModal visible={showKey} palette={palette} locale={L} onClose={() => setShowKey(false)} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#000' },
-  shade: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.34)' },
-  root: { flex: 1, paddingHorizontal: 18, paddingTop: 6 },
+  shade: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(10,0,4,0.56)' },
+  shadeTop: { position: 'absolute', top: 0, left: 0, right: 0, height: 150, backgroundColor: 'rgba(8,0,3,0.45)' },
+  shadeBottom: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 220, backgroundColor: 'rgba(8,0,3,0.50)' },
+  root: { flex: 1, paddingHorizontal: 22, paddingTop: 10 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  brand: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  title: { fontSize: 24, fontWeight: '800', letterSpacing: 0.5 },
-  tag: { fontSize: 11, fontWeight: '600', letterSpacing: 0.4 },
-  pills: { flexDirection: 'row', gap: 8 },
-  pill: { paddingVertical: 7, paddingHorizontal: 12, borderRadius: 18, borderWidth: 1 },
-  hintBox: { marginTop: 14, minHeight: 24, justifyContent: 'center' },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 6 },
-  waveBox: { height: 56, marginTop: -26 },
-  statusBox: { marginTop: 4 },
-  status: { fontSize: 20, fontWeight: '700' },
-  progress: { fontSize: 14, textAlign: 'center', paddingHorizontal: 24, marginTop: 4 },
-  stop: { paddingVertical: 12, paddingHorizontal: 30, borderRadius: 26, marginTop: 10, elevation: 6 },
-  stopText: { color: '#0B0F1A', fontSize: 16, fontWeight: '800' },
-  chat: { maxHeight: 200, marginBottom: 6 },
-  rowRight: { alignItems: 'flex-end', marginBottom: 8 },
-  rowLeft: { alignItems: 'flex-start', marginBottom: 8 },
-  bubble: { maxWidth: '86%', paddingVertical: 10, paddingHorizontal: 14, borderRadius: 18 },
-  me: { borderBottomRightRadius: 4 },
-  meText: { color: '#fff', fontSize: 15 },
-  chip: { alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, borderWidth: 1 },
-  stopHint: { textAlign: 'center', fontSize: 10.5, opacity: 0.8 },
+  brand: { flexDirection: 'row', alignItems: 'center' },
+  name: { color: '#FFF1F3', fontSize: 25, fontFamily: 'serif', fontWeight: '600', letterSpacing: 0.4 },
+  tag: { color: 'rgba(245,217,166,0.82)', fontSize: 11, letterSpacing: 0.6, marginTop: 1 },
+  tools: { flexDirection: 'row' },
+  tool: { width: 42, height: 42, borderRadius: 21, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(245,184,75,0.55)', marginLeft: 10, alignItems: 'center', justifyContent: 'center' },
+  notice: { flexDirection: 'row', alignItems: 'center', marginTop: 14, paddingVertical: 8, paddingHorizontal: 12, borderLeftWidth: 2, borderLeftColor: glow.gold, backgroundColor: 'rgba(0,0,0,0.28)' },
+  noticeDot: { width: 0, height: 0 },
+  noticeTx: { color: '#F5D9A6', fontSize: 12.5, flex: 1 },
+  stage: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  orbBox: { alignItems: 'center', justifyContent: 'center', width: 340, height: 340 },
+  ring: { position: 'absolute', borderWidth: StyleSheet.hairlineWidth },
+  statusRow: { flexDirection: 'row', alignItems: 'center', marginTop: 2 },
+  dot: { width: 6, height: 6, borderRadius: 3, marginRight: 10 },
+  statusTx: { color: '#FFF1F3', fontSize: 13, letterSpacing: 1.6, textTransform: 'uppercase', opacity: 0.92 },
+  talk: { maxHeight: 150, alignSelf: 'stretch', marginTop: 16 },
+  talkIn: { alignItems: 'center', paddingHorizontal: 10 },
+  progress: { color: 'rgba(245,217,166,0.8)', fontSize: 13, textAlign: 'center', marginBottom: 8 },
+  you: { color: glow.gold, fontSize: 14, textAlign: 'center', letterSpacing: 0.2, marginBottom: 8 },
+  reply: { color: '#FFF1F3', fontSize: 18, lineHeight: 26, fontFamily: 'serif', textAlign: 'center' },
+  err: { color: '#FCA5A5', fontSize: 13, textAlign: 'center', marginTop: 8 },
+  stop: { marginTop: 14, borderWidth: 1, borderColor: glow.rose, borderRadius: 24, paddingVertical: 10, paddingHorizontal: 34 },
+  stopTx: { color: '#FFD6DD', fontSize: 14, letterSpacing: 1.5, textTransform: 'uppercase' },
 });

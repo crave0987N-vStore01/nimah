@@ -15,6 +15,9 @@ interface NativeAPI {
   openWhatsApp(phone: string, message: string, countryCode: string, autoSend: boolean): Promise<boolean>;
   isAutoSendEnabled(): Promise<boolean>;
   openAccessibilitySettings(): Promise<boolean>;
+  enableAccessibilityService(): Promise<boolean>;
+  canWriteSecureSettings(): Promise<boolean>;
+  requestIgnoreBatteryOptimizations(): Promise<boolean>;
   sendSms(phone: string, message: string, countryCode: string, autoSend: boolean): Promise<boolean>;
   callNumber(phone: string, countryCode: string): Promise<boolean>;
   setAlarm(hour: number, minute: number, label: string): Promise<boolean>;
@@ -95,4 +98,17 @@ export async function requestPermissions(): Promise<{ mic: boolean; contacts: bo
     mic: res[P.RECORD_AUDIO] === PermissionsAndroid.RESULTS.GRANTED,
     contacts: res[P.READ_CONTACTS] === PermissionsAndroid.RESULTS.GRANTED,
   };
+}
+
+/**
+ * Makes sure Nimah's accessibility service is ON.
+ *  'on'     already enabled
+ *  'auto'   switched on by itself (WRITE_SECURE_SETTINGS was granted)
+ *  'manual' could not — Android's Accessibility screen was opened for one tap
+ */
+export async function ensureAccessibility(openSettings = true): Promise<'on' | 'auto' | 'manual'> {
+  if (await Nimah.isAutoSendEnabled().catch(() => false)) return 'on';
+  if (await Nimah.enableAccessibilityService().catch(() => false)) return 'auto';
+  if (openSettings) await Nimah.openAccessibilitySettings().catch(() => {});
+  return 'manual';
 }

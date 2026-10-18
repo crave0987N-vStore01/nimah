@@ -1,11 +1,11 @@
 export type ActionName =
   | 'send_whatsapp' | 'send_sms' | 'call_contact' | 'set_alarm' | 'set_timer'
   | 'open_app' | 'navigate' | 'play_music' | 'flashlight'
-  | 'phone_task' | 'answer' | 'unknown';
+  | 'enable_accessibility' | 'phone_task' | 'answer' | 'unknown';
 
 export const KNOWN_ACTIONS: ActionName[] = [
   'send_whatsapp', 'send_sms', 'call_contact', 'set_alarm', 'set_timer',
-  'open_app', 'navigate', 'play_music', 'flashlight', 'phone_task', 'answer', 'unknown',
+  'open_app', 'navigate', 'play_music', 'flashlight', 'enable_accessibility', 'phone_task', 'answer', 'unknown',
 ];
 
 /** Structured result Gemini returns for every voice command. */
@@ -37,6 +37,8 @@ export interface Settings {
   fullControl: boolean;
   /** Ask "are you sure?" before sending money, deleting, buying, etc. */
   confirmRisky: boolean;
+  /** Mic opens by itself when the app opens and keeps listening (no button). */
+  autoListen: boolean;
   maxSteps: number;
 }
 

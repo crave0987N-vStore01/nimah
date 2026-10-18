@@ -21,7 +21,7 @@ function Segmented<T extends string | number>(
         const on = o.value === value;
         return (
           <Pressable key={String(o.value)} onPress={() => onChange(o.value)}
-            style={[styles.segItem, { borderColor: palette.border, backgroundColor: on ? '#4F46E5' : palette.card }]}>
+            style={[styles.segItem, { borderColor: palette.border, backgroundColor: on ? '#E11D48' : palette.card }]}>
             <Text style={{ color: on ? '#fff' : palette.text }}>{o.label}</Text>
           </Pressable>
         );
@@ -65,12 +65,13 @@ export default function SettingsModal({ visible, settings: s, palette, onChange,
               options={[{ label: t(L, 'system'), value: 'system' }, { label: t(L, 'dark'), value: 'dark' }, { label: t(L, 'light'), value: 'light' }]} />
           </Row>
           {([
-            ['speakReplies', 'speakReplies'], ['fullControl', 'fullControl'], ['confirmRisky', 'confirmRisky'],
+            ['autoListen', 'autoListen'], ['speakReplies', 'speakReplies'], ['fullControl', 'fullControl'], ['confirmRisky', 'confirmRisky'],
             ['autoSend', 'autoSend'], ['backgroundService', 'background'],
           ] as const).map(([field, label]) => (
             <View key={field} style={styles.switchRow}>
               <Text style={{ color: palette.text, fontSize: 16 }}>{t(L, label)}</Text>
-              <Switch value={s[field]} onValueChange={(v) => onChange({ [field]: v })} />
+              <Switch value={s[field]} onValueChange={(v) => onChange({ [field]: v })}
+                trackColor={{ false: '#3A262B', true: '#B3173A' }} thumbColor={s[field] ? '#F5D9A6' : '#9A8388'} />
             </View>
           ))}
           <Pressable onPress={() => { Nimah.openAccessibilitySettings().catch(() => {}); }} style={[styles.btn, { borderColor: palette.border }]}>
@@ -91,12 +92,12 @@ export default function SettingsModal({ visible, settings: s, palette, onChange,
 const styles = StyleSheet.create({
   root: { flex: 1, padding: 16 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  title: { fontSize: 22, fontWeight: '700' },
+  title: { fontSize: 24, fontFamily: 'serif', fontWeight: '600' },
   rowBlock: { marginBottom: 18 },
-  label: { fontSize: 13, marginBottom: 6 },
+  label: { fontSize: 11, letterSpacing: 1.4, textTransform: 'uppercase', marginBottom: 8 },
   seg: { flexDirection: 'row', gap: 8 },
   segItem: { paddingVertical: 10, paddingHorizontal: 16, borderRadius: 10, borderWidth: 1 },
   input: { borderWidth: 1, borderRadius: 10, padding: 10, fontSize: 16, width: 100 },
-  switchRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
-  btn: { borderWidth: 1, borderRadius: 10, padding: 14, alignItems: 'center', marginTop: 8 },
+  switchRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(255,92,124,0.25)' },
+  btn: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 14, padding: 14, alignItems: 'center', marginTop: 12 },
 });

@@ -1,7 +1,7 @@
 // src/services/gemini.ts
 // Voice text -> validated Intent, with conversation memory, retry and optional backend proxy.
 import { Content, GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
-import { GEMINI_API_KEY, GEMINI_MODEL, GEMINI_PROXY_URL, PROXY_TOKEN } from '../config';
+import { GEMINI_API_KEY, GEMINI_API_KEYS, GEMINI_MODEL, GEMINI_PROXY_URL, PROXY_TOKEN } from '../config';
 import { makeError } from '../errors';
 import { AgentStep, Intent } from '../types';
 import { AGENT_INSTRUCTION, SYSTEM_INSTRUCTION, buildAgentSchema, buildSchema } from './prompt';
@@ -20,37 +20,63 @@ function remember(userText: string, modelJson: string) {
   while (history.length && history[0].role !== 'user') history.shift(); // Gemini needs a user-first history
 }
 
+// ---- keys + models, with automatic fallback ----------------------------------------------
+// Every (model, key) pair has its OWN free quota. On HTTP 429 ("You exceeded your current quota")
+// we put that pair to sleep and move on to the next one, so one empty quota never stops Nimah.
+const isRealKey = (k?: string) => !!k && !k.startsWith('YOUR_');
+let runtimeKeys: string[] = [];                      // keys the user pasted inside the app (KEY button)
+const allKeys = () => Array.from(new Set([...runtimeKeys, GEMINI_API_KEY, ...(GEMINI_API_KEYS ?? [])].filter(isRealKey)));
+/** Replaces the in-app keys (used first). Clears all cool-downs so the new key is tried at once. */
+export function setRuntimeKeys(keys: string[]) { runtimeKeys = keys.map((k) => k.trim()).filter(isRealKey); sleepUntil.clear(); }
+const MODELS = Array.from(new Set([
+  GEMINI_MODEL, 'gemini-flash-latest', 'gemini-flash-lite-latest',
+  'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.5-flash',
+]));
+interface Combo { id: string; key: string; model: string }
+const combos = (): Combo[] => { const ks = allKeys(); return MODELS.flatMap((m) => ks.map((k) => ({ id: `${m}#${k.slice(-6)}`, key: k, model: m }))); };
+const sleepUntil = new Map<string, number>();   // combo id -> epoch ms when it may be used again
+const FOREVER = Number.MAX_SAFE_INTEGER;
+
+const errText = (e: unknown) => String((e as Error)?.message ?? e);
+const isQuota = (e: unknown) => /\b429\b|quota|RESOURCE_EXHAUSTED|rate.?limit|too many requests/i.test(errText(e));
+const isGone = (e: unknown) => /\b404\b|no longer available|not found|is not supported/i.test(errText(e));
+const isBusy = (e: unknown) => /\b(500|502|503|504)\b|overloaded|UNAVAILABLE|high demand/i.test(errText(e));
+const isDaily = (e: unknown) => /PerDay|per day|daily/i.test(errText(e));
+
 /** Fails fast with a clear message when the build has no Gemini key. */
 function requireKey() {
-  if (!GEMINI_PROXY_URL && (!GEMINI_API_KEY || GEMINI_API_KEY.startsWith('YOUR_'))) {
-    throw makeError('NO_API_KEY', 'GEMINI_API_KEY is empty in this build');
-  }
+  if (!GEMINI_PROXY_URL && allKeys().length === 0) throw makeError('NO_API_KEY', 'GEMINI_API_KEY is empty in this build');
 }
 
-// If Google retires a model (HTTP 404 "no longer available"), step down this list automatically.
-const MODELS = Array.from(new Set([GEMINI_MODEL, 'gemini-flash-latest', 'gemini-3.5-flash', 'gemini-3.1-flash-lite']));
-let modelIdx = 0;
-const modelGone = (e: unknown) => /404|no longer available|not found|is not supported/i.test(String((e as Error)?.message ?? e));
+function nextCombo(): Combo | null {
+  const now = Date.now();
+  return combos().find((c) => (sleepUntil.get(c.id) ?? 0) <= now) ?? null;
+}
 
-/** Runs fn; if the current model has been retired, moves to the next one and retries. */
-async function withModelFallback<T>(fn: () => Promise<T>): Promise<T> {
+/** Runs fn with the first usable (model, key); on quota / overload / retired model, moves to the next. */
+async function withModelFallback<T>(fn: (c: Combo) => Promise<T>): Promise<T> {
+  let lastErr: unknown;
   for (;;) {
-    try { return await fn(); }
+    const c = nextCombo();
+    if (!c) throw makeError('QUOTA_EXCEEDED', lastErr ? errText(lastErr) : 'All Gemini models/keys are rate-limited');
+    try { return await fn(c); }
     catch (e) {
-      if (!GEMINI_PROXY_URL && modelGone(e) && modelIdx < MODELS.length - 1) {
-        modelIdx += 1; model = null; agentModel = null;
-        continue;
-      }
-      throw e;
+      lastErr = e;
+      if (isGone(e)) sleepUntil.set(c.id, FOREVER);
+      else if (isQuota(e)) sleepUntil.set(c.id, Date.now() + (isDaily(e) ? 60 * 60_000 : 65_000));
+      else if (isBusy(e)) sleepUntil.set(c.id, Date.now() + 15_000);
+      else throw e;
     }
   }
 }
 
-let model: ReturnType<GoogleGenerativeAI['getGenerativeModel']> | null = null;
-function getModel() {
-  if (!model) {
-    model = new GoogleGenerativeAI(GEMINI_API_KEY).getGenerativeModel({
-      model: MODELS[modelIdx],
+const modelCache = new Map<string, ReturnType<GoogleGenerativeAI['getGenerativeModel']>>();
+function getModel(c: Combo) {
+  const id = `chat|${c.id}`;
+  let m = modelCache.get(id);
+  if (!m) {
+    m = new GoogleGenerativeAI(c.key).getGenerativeModel({
+      model: c.model,
       systemInstruction: SYSTEM_INSTRUCTION,
       generationConfig: {
         responseMimeType: 'application/json',
@@ -58,8 +84,9 @@ function getModel() {
         temperature: 0.1,
       },
     });
+    modelCache.set(id, m);
   }
-  return model;
+  return m;
 }
 
 /** One round-trip: direct to Gemini (dev) or through your backend (production). */
@@ -75,8 +102,8 @@ async function callModel(text: string, context?: string): Promise<string> {
     if (!res.ok) throw new Error(`Proxy HTTP ${res.status}`);
     return (await res.json()).text as string;
   }
-  return withModelFallback(async () => {
-    const chat = getModel().startChat({ history });
+  return withModelFallback(async (c) => {
+    const chat = getModel(c).startChat({ history });
     const result = await chat.sendMessage(sent);
     return result.response.text();
   });
@@ -94,12 +121,12 @@ export async function parseCommand(text: string, context?: string, attempts = 3)
   let lastError: unknown;
   for (let i = 0; i < attempts; i++) {
     try {
-      const raw = await withTimeout(callModel(text, context), 15000);
+      const raw = await withTimeout(callModel(text, context), 30000);
       const intent = validateIntent(JSON.parse(raw));
       remember(text, raw);
       return intent;
     } catch (e) {
-      if ((e as { code?: string })?.code === 'NO_API_KEY') throw e;
+      if (['NO_API_KEY', 'QUOTA_EXCEEDED'].includes((e as { code?: string })?.code ?? '')) throw e;
       lastError = e;
       if (i < attempts - 1) await sleep(500 * 2 ** i);
     }
@@ -110,11 +137,12 @@ export async function parseCommand(text: string, context?: string, attempts = 3)
 // ---------------------------------------------------------------------------------------
 // Agent: one decision per screen. Stateless — the step log is part of the prompt.
 // ---------------------------------------------------------------------------------------
-let agentModel: ReturnType<GoogleGenerativeAI['getGenerativeModel']> | null = null;
-function getAgentModel() {
-  if (!agentModel) {
-    agentModel = new GoogleGenerativeAI(GEMINI_API_KEY).getGenerativeModel({
-      model: MODELS[modelIdx],
+function getAgentModel(c: Combo) {
+  const id = `agent|${c.id}`;
+  let m = modelCache.get(id);
+  if (!m) {
+    m = new GoogleGenerativeAI(c.key).getGenerativeModel({
+      model: c.model,
       systemInstruction: AGENT_INSTRUCTION,
       generationConfig: {
         responseMimeType: 'application/json',
@@ -122,8 +150,9 @@ function getAgentModel() {
         temperature: 0.2,
       },
     });
+    modelCache.set(id, m);
   }
-  return agentModel;
+  return m;
 }
 
 /** "https://host/nimah" -> "https://host/agent" */
@@ -142,8 +171,8 @@ async function callAgentModel(prompt: string, imageBase64: string | null): Promi
   }
   const parts: any[] = [{ text: prompt }];
   if (imageBase64) parts.push({ inlineData: { mimeType: 'image/jpeg', data: imageBase64 } });
-  return withModelFallback(async () => {
-    const result = await getAgentModel().generateContent({ contents: [{ role: 'user', parts }] });
+  return withModelFallback(async (c) => {
+    const result = await getAgentModel(c).generateContent({ contents: [{ role: 'user', parts }] });
     return result.response.text();
   });
 }
@@ -158,7 +187,7 @@ export async function decideNextStep(
       const raw = await withTimeout(callAgentModel(prompt, imageBase64), 25000);
       return validateAgentStep(JSON.parse(raw), screenCount);
     } catch (e) {
-      if ((e as { code?: string })?.code === 'NO_API_KEY') throw e;
+      if (['NO_API_KEY', 'QUOTA_EXCEEDED'].includes((e as { code?: string })?.code ?? '')) throw e;
       lastError = e;
       if (i < attempts - 1) await sleep(500 * 2 ** i);
     }

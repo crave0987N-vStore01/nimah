@@ -34,11 +34,15 @@ jobs:
       - name: Create src/config.ts from secrets
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
+          GEMINI_API_KEY_3: ${{ secrets.GEMINI_API_KEY_3 }}
         run: |
           node -e "
           const fs = require('fs');
           let s = fs.readFileSync('src/config.example.ts', 'utf8');
           s = s.replace('YOUR_GEMINI_API_KEY', process.env.GEMINI_API_KEY || '');
+          s = s.replace('YOUR_EXTRA_KEY_2', process.env.GEMINI_API_KEY_2 || '');
+          s = s.replace('YOUR_EXTRA_KEY_3', process.env.GEMINI_API_KEY_3 || '');
           fs.writeFileSync('src/config.ts', s);
           "
 

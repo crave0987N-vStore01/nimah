@@ -1,6 +1,6 @@
 // src/services/agent.ts — the AI drives the phone: look at screen -> decide -> act -> repeat.
 import { makeError } from '../errors';
-import { Nimah } from '../native/Nimah';
+import { ensureAccessibility, Nimah } from '../native/Nimah';
 import { AgentStep, Locale, ScreenState } from '../types';
 import { decideNextStep } from './gemini';
 import { buildAgentPrompt } from './prompt';
@@ -75,7 +75,8 @@ export async function runAgent(goal: string, h: AgentHooks): Promise<AgentResult
 
   const stopped = () => msg(h.locale, 'Okay, I stopped.', 'හරි, නැවැත්තුවා.');
 
-  if (!(await Nimah.isAutoSendEnabled().catch(() => false))) throw makeError('A11Y_NOT_ENABLED');
+  if ((await ensureAccessibility(true)) === 'manual') throw makeError('A11Y_NOT_ENABLED');
+  await sleep(600);
   await Nimah.consumeStopRequest().catch(() => false); // clear any stale stop
 
   for (let n = 0; n < h.maxSteps; n++) {

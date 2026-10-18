@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Animated } from 'react-native';
 import { errorMessage, t } from '../i18n';
-import { Nimah, requestPermissions } from '../native/Nimah';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { ensureAccessibility, Nimah, requestPermissions } from '../native/Nimah';
 import { executeIntent } from '../services/actions';
 import { matchChoice } from '../services/contacts';
 import { parseCommand, resetConversation } from '../services/gemini';
@@ -38,6 +39,9 @@ export function useAssistant(settings: Settings, onHistory: (h: HistoryEntry) =>
   const busyRef = useRef(false);                          // true while a command / agent task runs
   const cancelRef = useRef(false);
   const followUps = useRef(0);
+  const failRef = useRef(0);                               // consecutive mic failures (for back-off)
+  const micBlockedRef = useRef(false);                     // permission refused -> stop auto-listening
+  const [kick, setKick] = useState(0);                  // forces the auto-listen effect to re-run
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
   const level = useRef(new Animated.Value(0)).current;    // mic loudness 0..1 for the waveform
@@ -64,7 +68,7 @@ export function useAssistant(settings: Settings, onHistory: (h: HistoryEntry) =>
   const listen = useCallback(async () => {
     updateStatus('listening');
     try { await Nimah.startListening(settingsRef.current.locale); }
-    catch (e: any) { setError(e?.message ?? 'Mic error'); restStatus(); }
+    catch (e: any) { failRef.current += 1; setError(e?.message ?? 'Mic error'); restStatus(); }
   }, [restStatus, updateStatus]);
 
   // ---- choices: "which Asanka?" and yes / no ------------------------------------------
@@ -116,7 +120,7 @@ export function useAssistant(settings: Settings, onHistory: (h: HistoryEntry) =>
   // ---- the main pipeline ---------------------------------------------------------
   const handleTranscript = useCallback(async (text: string) => {
     const s = settingsRef.current;
-    if (!text.trim()) { await say(t(s.locale, 'didntCatch')); return; }
+    if (text.trim().length < 2) { restStatus(); setKick((k) => k + 1); return; } // noise: ignore silently
     busyRef.current = true;
     cancelRef.current = false;
     updateStatus('processing');
@@ -124,15 +128,17 @@ export function useAssistant(settings: Settings, onHistory: (h: HistoryEntry) =>
     let startedService = false;
     try {
       const info = await Nimah.deviceInfo().catch(() => null);
-      const context = info
-        ? `Device info: ${info.date}, ${info.time}, battery ${info.battery}%${info.charging ? ' (charging)' : ''}`
-        : undefined;
+      const front = await Nimah.screenRead().then((sc) => sc.package).catch(() => null);
+      const context = [
+        info ? `Device info: ${info.date}, ${info.time}, battery ${info.battery}%${info.charging ? ' (charging)' : ''}` : '',
+        front && front !== 'unknown' ? `App currently on screen: ${front}` : '',
+      ].filter(Boolean).join('. ') || undefined;
       parsed = await parseCommand(text, context);
       setIntent(parsed);
 
       if (parsed.action === 'phone_task') {
         // Keep the mic + process alive while other apps are in front.
-        if (!s.backgroundService) { await Nimah.startBackgroundService().catch(() => {}); startedService = true; }
+        if (!s.backgroundService && !s.autoListen) { await Nimah.startBackgroundService().catch(() => {}); startedService = true; }
         setAgentRunning(true);
         setProgress(parsed.spoken_reply);
         hint(parsed.spoken_reply);
@@ -146,8 +152,9 @@ export function useAssistant(settings: Settings, onHistory: (h: HistoryEntry) =>
           say, hint, ask, confirm, onProgress: setProgress, isCancelled: () => cancelRef.current,
         },
       });
-      onHistory({ transcript: text, action: parsed.action, summary: reply, ok: parsed.action !== 'unknown' });
       busyRef.current = false;
+      if (reply.trim() === '...') { setIntent(null); setTranscript(''); restStatus(); return; } // chatter: stay silent
+      onHistory({ transcript: text, action: parsed.action, summary: reply, ok: parsed.action !== 'unknown' });
       await say(reply);
 
       // Assistant asked a question -> listen for the answer without another tap.
@@ -158,7 +165,7 @@ export function useAssistant(settings: Settings, onHistory: (h: HistoryEntry) =>
     } catch (e: any) {
       const m = errorMessage(s.locale, e?.code);
       const detail = String(e?.message ?? '').replace(/\s+/g, ' ').slice(0, 220);
-      setError(detail && detail !== e?.code ? `${m}\n(${detail})` : m);
+      setError(detail && detail !== e?.code && e?.code !== 'QUOTA_EXCEEDED' ? `${m}\n(${detail})` : m);
       onHistory({ transcript: text, action: parsed?.action ?? 'unknown', summary: m, ok: false });
       busyRef.current = false;
       await say(m);
@@ -166,13 +173,15 @@ export function useAssistant(settings: Settings, onHistory: (h: HistoryEntry) =>
       busyRef.current = false;
       setAgentRunning(false);
       setProgress('');
-      if (startedService && !settingsRef.current.backgroundService) Nimah.stopBackgroundService().catch(() => {});
+      if (startedService && !settingsRef.current.backgroundService && !settingsRef.current.autoListen) Nimah.stopBackgroundService().catch(() => {});
       if (statusRef.current === 'processing') updateStatus('idle');
+      setKick((k) => k + 1); // -> start listening again
     }
   }, [ask, askChoice, confirm, hint, listen, onHistory, say, updateStatus]);
 
   const onResult = useCallback((text: string) => {
-    setTranscript(text);
+    failRef.current = 0;
+    if (text.trim()) setTranscript(text);
 
     // 1) The AI asked a free-form question
     if (askRef.current) { askRef.current(text.trim() ? text : null); return; }
@@ -193,11 +202,15 @@ export function useAssistant(settings: Settings, onHistory: (h: HistoryEntry) =>
     handleTranscript(text);
   }, [handleTranscript, listen, say, settleChoice]);
 
-  const onSpeechError = useCallback((message: string) => {
+  const onSpeechError = useCallback((message: string, code?: number) => {
     if (askRef.current) { askRef.current(null); return; }
     if (choiceRef.current) { settleChoice(null); return; }
-    setError(message);
+    // 6 = nothing heard, 7 = no match: normal while we listen all the time -> stay quiet.
+    const quiet = code === 6 || code === 7;
+    if (code === 9) micBlockedRef.current = true;        // permission missing
+    if (quiet) failRef.current = 0; else { failRef.current += 1; if (failRef.current > 2) setError(message); }
     restStatus();
+    setKick((k) => k + 1);
   }, [restStatus, settleChoice]);
 
   // Subscribe once; always call the latest handlers via a ref.
@@ -207,7 +220,7 @@ export function useAssistant(settings: Settings, onHistory: (h: HistoryEntry) =>
     const subs = [
       Nimah.on('NimahSpeechPartial', ({ text }) => setTranscript(text)),
       Nimah.on('NimahSpeechResult', ({ text }) => latest.current.onResult(text)),
-      Nimah.on('NimahSpeechError', ({ message }) => latest.current.onSpeechError(message)),
+      Nimah.on('NimahSpeechError', ({ message, code }) => latest.current.onSpeechError(message, code)),
       Nimah.on('NimahSpeechRms', ({ level: db }) => {
         Animated.timing(level, { toValue: Math.max(0, Math.min(1, (db + 2) / 12)), duration: 90, useNativeDriver: true }).start();
       }),
@@ -244,12 +257,55 @@ export function useAssistant(settings: Settings, onHistory: (h: HistoryEntry) =>
 
   // ---- background (foreground-service) mode ----------------------------------------
   useEffect(() => {
-    if (settings.backgroundService) requestPermissions().then(() => Nimah.startBackgroundService()).catch(() => {});
+    if (settings.backgroundService || settings.autoListen) requestPermissions().then(() => Nimah.startBackgroundService()).catch(() => {});
     else Nimah.stopBackgroundService().catch(() => {});
-  }, [settings.backgroundService]);
+  }, [settings.backgroundService, settings.autoListen]);
+
+  // ---- first-run setup: switch phone control on by itself when possible, keep Nimah alive in the background ----
+  useEffect(() => {
+    if (!settings.fullControl) return;
+    ensureAccessibility(false).then((r) => {
+      if (r === 'manual') hint(t(settingsRef.current.locale, 'a11yHint'));
+    }).catch(() => {});
+    AsyncStorage.getItem('nimah.battery.asked').then((v) => {
+      if (v) return;
+      AsyncStorage.setItem('nimah.battery.asked', '1').catch(() => {});
+      Nimah.requestIgnoreBatteryOptimizations().catch(() => {});
+    }).catch(() => {});
+  }, [settings.fullControl, hint]);
+
+  // ---- ALWAYS LISTENING: the mic opens by itself and re-opens after every command ---------
+  const permAsked = useRef(false);
+  useEffect(() => {
+    if (!settings.autoListen) return undefined;
+    if (status !== 'idle' || busyRef.current || choiceRef.current || askRef.current || micBlockedRef.current) return undefined;
+    const delay = Math.min(350 * 2 ** failRef.current, 8000);   // back off while the recogniser keeps failing
+    const id = setTimeout(async () => {
+      if (statusRef.current !== 'idle' || busyRef.current || choiceRef.current || askRef.current) return;
+      if (!permAsked.current) {
+        permAsked.current = true;
+        const perms = await requestPermissions();
+        if (!perms.mic) { micBlockedRef.current = true; setError(errorMessage(settingsRef.current.locale, 'NO_MIC_PERMISSION')); return; }
+      }
+      if (statusRef.current === 'idle' && !busyRef.current) await listen();
+    }, delay);
+    return () => clearTimeout(id);
+  }, [settings.autoListen, status, kick, listen]);
+
+  // Turning "always listening" off -> stop the mic.
+  useEffect(() => {
+    if (!settings.autoListen && statusRef.current === 'listening') Nimah.cancelListening().then(restStatus).catch(() => {});
+  }, [settings.autoListen, restStatus]);
+
+  /** Typed command ("Start a chat"): same pipeline as a spoken one. */
+  const sendText = useCallback((text: string) => {
+    if (busyRef.current || !text.trim()) return;
+    setError(''); setTranscript(text); setIntent(null);
+    handleTranscript(text);
+  }, [handleTranscript]);
 
   return {
     status, transcript, intent, error, choice, level, progress, agentRunning,
-    onMicPress, settleChoice, newConversation, stopTask,
+    onMicPress, settleChoice, newConversation, stopTask, sendText,
   };
 }

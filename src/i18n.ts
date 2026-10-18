@@ -1,7 +1,7 @@
 import { Locale } from './types';
 
 const en = {
-  tapToSpeak: 'Tap to speak', listening: 'Listening...', processing: 'Processing...', speaking: 'Speaking...',
+  tapToSpeak: 'Say something...', listening: 'Listening...', processing: 'Processing...', speaking: 'Speaking...',
   hint: 'Try: “Send WhatsApp to Asanka, come tomorrow” or “Turn on wifi” or “Post a story on Facebook”',
   didntCatch: "I didn't catch that.", whichOne: 'Which one?', cancel: 'Cancel',
   settings: 'Settings', history: 'History', close: 'Close', clear: 'Clear', noHistory: 'No commands yet',
@@ -24,10 +24,15 @@ const en = {
   working: 'Working...', setupControl: 'Enable phone control', setupNotif: 'Enable notification access',
   stopHint: 'Emergency stop: hold Volume Down, then press Volume Up',
   yes: 'Yes', no: 'No', answerYesNo: 'Say yes or no.',
+  autoListen: 'Always listening (no button)',
+  a11yHint: 'Phone control is off. Say: turn on accessibility.',
+  a11yAlready: 'Phone control is already on.', a11yAuto: 'Done, phone control is on.',
+  a11yManual: 'I opened the Accessibility screen. Tap Nimah, then switch it on.',
+  errQuota: 'The AI quota is used up for now. Wait a minute and try again, or add another Gemini key.',
 };
 
 const si: typeof en = {
-  tapToSpeak: 'කතා කිරීමට ඔබන්න', listening: 'සවන් දෙමින්...', processing: 'සකසමින්...', speaking: 'කතා කරමින්...',
+  tapToSpeak: 'කතා කරන්න...', listening: 'සවන් දෙමින්...', processing: 'සකසමින්...', speaking: 'කතා කරමින්...',
   hint: 'උදා: “Asanka ට WhatsApp කරන්න, හෙට එන්න”',
   didntCatch: 'මට ඇසුණේ නැහැ.', whichOne: 'කුමන එකද?', cancel: 'අවලංගු කරන්න',
   settings: 'සැකසුම්', history: 'ඉතිහාසය', close: 'වසන්න', clear: 'මකන්න', noHistory: 'තවම විධාන නැත',
@@ -50,6 +55,11 @@ const si: typeof en = {
   working: 'වැඩ කරමින්...', setupControl: 'ෆෝන් පාලනය සක්‍රීය කරන්න', setupNotif: 'Notification access සක්‍රීය කරන්න',
   stopHint: 'හදිසි නවත්වීම: Volume Down අල්ලාගෙන Volume Up ඔබන්න',
   yes: 'ඔව්', no: 'නැහැ', answerYesNo: 'ඔව් හෝ නැහැ කියන්න.',
+  autoListen: 'හැමවිටම සවන් දෙන්න (බොත්තමක් නැතිව)',
+  a11yHint: 'ෆෝන් පාලනය off. Accessibility on කරන්න කියලා කියන්න.',
+  a11yAlready: 'ෆෝන් පාලනය කලින් ඉඳන්ම on.', a11yAuto: 'හරි, ෆෝන් පාලනය on කළා.',
+  a11yManual: 'Accessibility screen එක open කළා. Nimah තෝරලා on කරන්න.',
+  errQuota: 'AI එකේ quota එක දැනට ඉවරයි. විනාඩියක් ඉඳලා නැවත කියන්න, නැත්නම් තවත් Gemini key එකක් දාන්න.',
 };
 
 export type Key = keyof typeof en;
@@ -67,5 +77,6 @@ const ERROR_KEYS: Record<string, Key> = {
   NOTIF_NOT_ENABLED: 'errNotif',
   GEMINI_FAILED: 'errGemini',
   NO_API_KEY: 'errNoKey',
+  QUOTA_EXCEEDED: 'errQuota',
 };
 export const errorMessage = (locale: Locale, code?: string) => t(locale, ERROR_KEYS[code ?? ''] ?? 'errGeneric');
