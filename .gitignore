@@ -1,0 +1,20 @@
+node_modules/
+src/config.ts
+.DS_Store
+# Android
+android/app/build/
+android/build/
+android/.gradle/
+android/local.properties
+android/app/release/
+*.jks
+.idea/
+*.iml
+# iOS
+ios/Pods/
+ios/build/
+# misc
+npm-debug.log
+yarn-error.log
+.bundle/
+vendor/
