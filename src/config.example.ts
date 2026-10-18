@@ -2,7 +2,7 @@
 import { Settings } from './types';
 
 // ---- Gemini -------------------------------------------------------------
-export const GEMINI_MODEL = 'gemini-2.5-flash';
+export const GEMINI_MODEL = 'gemini-flash-latest'; // auto-follows Google's current Flash model
 
 // DEV ONLY: a key inside an APK can be extracted. Leave GEMINI_PROXY_URL empty
 // to call Gemini directly with this key, or set it to your backend (see backend/).

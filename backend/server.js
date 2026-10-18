@@ -13,13 +13,13 @@ if (!GEMINI_API_KEY || !NIMAH_TOKEN) {
 }
 
 const model = new GoogleGenerativeAI(GEMINI_API_KEY).getGenerativeModel({
-  model: 'gemini-2.5-flash',
+  model: 'gemini-flash-latest',
   systemInstruction: SYSTEM_INSTRUCTION,
   generationConfig: { responseMimeType: 'application/json', responseSchema: buildSchema(SchemaType), temperature: 0.1 },
 });
 
 const agentModel = new GoogleGenerativeAI(GEMINI_API_KEY).getGenerativeModel({
-  model: 'gemini-2.5-flash',
+  model: 'gemini-flash-latest',
   systemInstruction: AGENT_INSTRUCTION,
   generationConfig: { responseMimeType: 'application/json', responseSchema: buildAgentSchema(SchemaType), temperature: 0.2 },
 });

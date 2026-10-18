@@ -27,11 +27,30 @@ function requireKey() {
   }
 }
 
+// If Google retires a model (HTTP 404 "no longer available"), step down this list automatically.
+const MODELS = Array.from(new Set([GEMINI_MODEL, 'gemini-flash-latest', 'gemini-3.5-flash', 'gemini-3.1-flash-lite']));
+let modelIdx = 0;
+const modelGone = (e: unknown) => /404|no longer available|not found|is not supported/i.test(String((e as Error)?.message ?? e));
+
+/** Runs fn; if the current model has been retired, moves to the next one and retries. */
+async function withModelFallback<T>(fn: () => Promise<T>): Promise<T> {
+  for (;;) {
+    try { return await fn(); }
+    catch (e) {
+      if (!GEMINI_PROXY_URL && modelGone(e) && modelIdx < MODELS.length - 1) {
+        modelIdx += 1; model = null; agentModel = null;
+        continue;
+      }
+      throw e;
+    }
+  }
+}
+
 let model: ReturnType<GoogleGenerativeAI['getGenerativeModel']> | null = null;
 function getModel() {
   if (!model) {
     model = new GoogleGenerativeAI(GEMINI_API_KEY).getGenerativeModel({
-      model: GEMINI_MODEL,
+      model: MODELS[modelIdx],
       systemInstruction: SYSTEM_INSTRUCTION,
       generationConfig: {
         responseMimeType: 'application/json',
@@ -56,9 +75,11 @@ async function callModel(text: string, context?: string): Promise<string> {
     if (!res.ok) throw new Error(`Proxy HTTP ${res.status}`);
     return (await res.json()).text as string;
   }
-  const chat = getModel().startChat({ history });
-  const result = await chat.sendMessage(sent);
-  return result.response.text();
+  return withModelFallback(async () => {
+    const chat = getModel().startChat({ history });
+    const result = await chat.sendMessage(sent);
+    return result.response.text();
+  });
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -93,7 +114,7 @@ let agentModel: ReturnType<GoogleGenerativeAI['getGenerativeModel']> | null = nu
 function getAgentModel() {
   if (!agentModel) {
     agentModel = new GoogleGenerativeAI(GEMINI_API_KEY).getGenerativeModel({
-      model: GEMINI_MODEL,
+      model: MODELS[modelIdx],
       systemInstruction: AGENT_INSTRUCTION,
       generationConfig: {
         responseMimeType: 'application/json',
@@ -121,8 +142,10 @@ async function callAgentModel(prompt: string, imageBase64: string | null): Promi
   }
   const parts: any[] = [{ text: prompt }];
   if (imageBase64) parts.push({ inlineData: { mimeType: 'image/jpeg', data: imageBase64 } });
-  const result = await getAgentModel().generateContent({ contents: [{ role: 'user', parts }] });
-  return result.response.text();
+  return withModelFallback(async () => {
+    const result = await getAgentModel().generateContent({ contents: [{ role: 'user', parts }] });
+    return result.response.text();
+  });
 }
 
 /** Asks Gemini for the next single action. Retries on network / parse errors. */
