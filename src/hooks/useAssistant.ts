@@ -157,7 +157,8 @@ export function useAssistant(settings: Settings, onHistory: (h: HistoryEntry) =>
       } else followUps.current = 0;
     } catch (e: any) {
       const m = errorMessage(s.locale, e?.code);
-      setError(m);
+      const detail = String(e?.message ?? '').replace(/\s+/g, ' ').slice(0, 220);
+      setError(detail && detail !== e?.code ? `${m}\n(${detail})` : m);
       onHistory({ transcript: text, action: parsed?.action ?? 'unknown', summary: m, ok: false });
       busyRef.current = false;
       await say(m);

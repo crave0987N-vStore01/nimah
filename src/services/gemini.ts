@@ -20,6 +20,13 @@ function remember(userText: string, modelJson: string) {
   while (history.length && history[0].role !== 'user') history.shift(); // Gemini needs a user-first history
 }
 
+/** Fails fast with a clear message when the build has no Gemini key. */
+function requireKey() {
+  if (!GEMINI_PROXY_URL && (!GEMINI_API_KEY || GEMINI_API_KEY.startsWith('YOUR_'))) {
+    throw makeError('NO_API_KEY', 'GEMINI_API_KEY is empty in this build');
+  }
+}
+
 let model: ReturnType<GoogleGenerativeAI['getGenerativeModel']> | null = null;
 function getModel() {
   if (!model) {
@@ -38,6 +45,7 @@ function getModel() {
 
 /** One round-trip: direct to Gemini (dev) or through your backend (production). */
 async function callModel(text: string, context?: string): Promise<string> {
+  requireKey();
   const sent = context ? `${text}\n\n(${context})` : text;
   if (GEMINI_PROXY_URL) {
     const res = await fetch(GEMINI_PROXY_URL, {
@@ -70,6 +78,7 @@ export async function parseCommand(text: string, context?: string, attempts = 3)
       remember(text, raw);
       return intent;
     } catch (e) {
+      if ((e as { code?: string })?.code === 'NO_API_KEY') throw e;
       lastError = e;
       if (i < attempts - 1) await sleep(500 * 2 ** i);
     }
@@ -100,6 +109,7 @@ function getAgentModel() {
 const agentProxyUrl = () => GEMINI_PROXY_URL.replace(/\/nimah\/?$/, '') + '/agent';
 
 async function callAgentModel(prompt: string, imageBase64: string | null): Promise<string> {
+  requireKey();
   if (GEMINI_PROXY_URL) {
     const res = await fetch(agentProxyUrl(), {
       method: 'POST',
@@ -125,6 +135,7 @@ export async function decideNextStep(
       const raw = await withTimeout(callAgentModel(prompt, imageBase64), 25000);
       return validateAgentStep(JSON.parse(raw), screenCount);
     } catch (e) {
+      if ((e as { code?: string })?.code === 'NO_API_KEY') throw e;
       lastError = e;
       if (i < attempts - 1) await sleep(500 * 2 ** i);
     }
