@@ -1,8 +1,10 @@
-// src/config.ts — add this file to .gitignore!
+// src/config.example.ts — add this file to .gitignore!
 import { Settings } from './types';
 
 // ---- Gemini -------------------------------------------------------------
-export const GEMINI_MODEL = 'gemini-flash-latest'; // auto-follows Google's current Flash model
+// Use a free-tier Gemini model when you are on the Google AI Studio free quota.
+// The app will automatically fall over to the next model/key when a quota is exhausted.
+export const GEMINI_MODEL = 'gemini-2.5-flash-lite';
 
 // DEV ONLY: a key inside an APK can be extracted. Leave GEMINI_PROXY_URL empty
 // to call Gemini directly with this key, or set it to your backend (see backend/).

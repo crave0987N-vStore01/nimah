@@ -73,6 +73,12 @@ export function useAssistant(settings: Settings, onHistory: (h: HistoryEntry) =>
     catch (e: any) { failRef.current += 1; setError(e?.message ?? 'Mic error'); restStatus(); }
   }, [restStatus, updateStatus]);
 
+  const ensureListening = useCallback(async () => {
+    if (!settingsRef.current.autoListen) return;
+    if (statusRef.current !== 'idle' || busyRef.current || choiceRef.current || askRef.current || micBlockedRef.current) return;
+    try { await listen(); } catch {}
+  }, [listen]);
+
   // ---- choices: "which Asanka?" and yes / no ------------------------------------------
   const settleChoice = useCallback((picked: Choice | null) => {
     const pending = choiceRef.current;
@@ -313,6 +319,22 @@ export function useAssistant(settings: Settings, onHistory: (h: HistoryEntry) =>
     return () => clearTimeout(id);
   }, [settings.autoListen, status, kick, listen]);
 
+  // This keeps the assistant listening after the user switches to WhatsApp or another app.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (st) => {
+      if (st === 'active') {
+        if (settingsRef.current.askBack && Date.now() - lastGreetAt.current > 60_000) {
+          greeted.current = false;
+          setKick((k) => k + 1);
+        }
+        if (settingsRef.current.autoListen) {
+          ensureListening().catch(() => {});
+        }
+      }
+    });
+    return () => sub.remove();
+  }, [ensureListening]);
+
   // Greet again every time the app is opened (brought to the front) - but not more than once a minute.
   useEffect(() => {
     const sub = AppState.addEventListener('change', (st) => {
@@ -341,3 +363,6 @@ export function useAssistant(settings: Settings, onHistory: (h: HistoryEntry) =>
     onMicPress, settleChoice, newConversation, stopTask, sendText,
   };
 }
+
+
+
