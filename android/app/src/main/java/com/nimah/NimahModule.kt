@@ -23,6 +23,7 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.speech.tts.Voice
 import android.telephony.SmsManager
 import androidx.core.content.ContextCompat
 import com.facebook.react.bridge.*
@@ -76,6 +77,19 @@ class NimahModule(private val rc: ReactApplicationContext) :
             digits.startsWith("0") -> countryCode + digits.drop(1)
             else -> digits
         }
+    }
+
+    private fun preferredMaleVoice(locale: Locale): Voice? {
+        val voices = tts?.voices ?: return null
+        val languageMatch = voices.filter { it.locale != null && (it.locale == locale || it.locale.language == locale.language) }
+
+        val exactMale = languageMatch.firstOrNull { it.gender == Voice.GENDER_MALE }
+            ?: languageMatch.firstOrNull { it.name.contains("male", ignoreCase = true) || it.name.contains("man", ignoreCase = true) }
+        if (exactMale != null) return exactMale
+
+        val fallbackMale = voices.firstOrNull { it.gender == Voice.GENDER_MALE }
+            ?: voices.firstOrNull { it.name.contains("male", ignoreCase = true) || it.name.contains("man", ignoreCase = true) }
+        return fallbackMale
     }
 
     // Required by NativeEventEmitter
@@ -185,10 +199,20 @@ class NimahModule(private val rc: ReactApplicationContext) :
         if (!ttsReady) { promise.reject("TTS_NOT_READY", "Text-to-speech not initialised"); return }
         resolveSpeak()
         pendingSpeak = promise
-        val result = tts?.setLanguage(Locale.forLanguageTag(locale))
+
+        val localeObj = Locale.forLanguageTag(locale)
+        val preferredVoice = preferredMaleVoice(localeObj)
+        if (preferredVoice != null) {
+            tts?.voice = preferredVoice
+        }
+
+        val result = tts?.setLanguage(localeObj)
         // Language pack missing (e.g. Sinhala voice not installed) -> fall back to English.
         if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
             tts?.setLanguage(Locale.US)
+        }
+        if (preferredVoice != null) {
+            tts?.voice = preferredVoice
         }
         tts?.setSpeechRate(rate.toFloat())
         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "nimah-utterance")
