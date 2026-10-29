@@ -18,6 +18,7 @@ import android.os.Looper
 import android.provider.AlarmClock
 import android.provider.ContactsContract.CommonDataKinds.Phone
 import android.provider.MediaStore
+import android.provider.Settings
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -249,25 +250,19 @@ class NimahModule(private val rc: ReactApplicationContext) :
         }
         Thread {
             try {
-                val resolver = rc.contentResolver
-                val uri = Phone.CONTENT_URI
-                val projection = arrayOf(Phone.DISPLAY_NAME, Phone.NUMBER)
-                val cursor = resolver.query(uri, projection, null, null, "${Phone.DISPLAY_NAME} COLLATE LOCALIZED ASC LIMIT 40")
                 val out = Arguments.createArray()
-                if (cursor != null) {
-                    while (cursor.moveToNext()) {
-                        val displayName = cursor.getString(cursor.getColumnIndexOrThrow(Phone.DISPLAY_NAME)) ?: ""
-                        val number = cursor.getString(cursor.getColumnIndexOrThrow(Phone.NUMBER)) ?: ""
-                        if (displayName.isBlank() || number.isBlank()) continue
-                        if (displayName.contains(name, ignoreCase = true)) {
-                            val item = Arguments.createMap().apply {
-                                putString("name", displayName)
-                                putString("number", number)
-                            }
-                            out.pushMap(item)
-                        }
+                rc.contentResolver.query(
+                    Phone.CONTENT_URI, arrayOf(Phone.DISPLAY_NAME, Phone.NUMBER),
+                    "${Phone.DISPLAY_NAME} LIKE ?", arrayOf("%$name%"),
+                    "${Phone.DISPLAY_NAME} ASC"
+                )?.use { c ->
+                    while (c.moveToNext() && out.size() < 40) {
+                        val n = c.getString(0) ?: continue
+                        val num = c.getString(1) ?: continue
+                        out.pushMap(Arguments.createMap().apply {
+                            putString("name", n); putString("number", num)
+                        })
                     }
-                    cursor.close()
                 }
                 promise.resolve(out)
             } catch (e: Exception) {
@@ -276,16 +271,23 @@ class NimahModule(private val rc: ReactApplicationContext) :
         }.start()
     }
 
-    // ---------------------------------------------------------------- simple actions
+    // ---------------------------------------------------------------- messaging
+    /** Opens a WhatsApp chat with [message]; sends it automatically if [autoSend] and the accessibility service is on. */
     @ReactMethod
     fun openWhatsApp(phone: String, message: String, countryCode: String, autoSend: Boolean, promise: Promise) {
         val number = normalizeNumber(phone, countryCode)
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/$number?text=${Uri.encode(message)}"))
-            .setPackage("com.whatsapp")
-        val okay = launch(intent)
-        if (okay) promise.resolve(true) else promise.reject("NO_WHATSAPP", "WhatsApp not installed")
+        val uri = Uri.parse("https://wa.me/$number?text=${Uri.encode(message)}")
+        // Hands-free send: arm the accessibility service (user must have enabled it).
+        if (autoSend && NimahAccessibilityService.isEnabled(rc)) NimahAccessibilityService.arm()
+        // Try WhatsApp, then WhatsApp Business.
+        val ok = listOf("com.whatsapp", "com.whatsapp.w4b").any { pkg ->
+            launch(Intent(Intent.ACTION_VIEW, uri).setPackage(pkg))
+        }
+        if (ok) promise.resolve(true)
+        else promise.reject("WHATSAPP_NOT_INSTALLED", "WhatsApp is not installed")
     }
 
+    /** Sends directly (SEND_SMS granted + autoSend), otherwise opens the SMS app pre-filled. */
     @ReactMethod
     fun sendSms(phone: String, message: String, countryCode: String, autoSend: Boolean, promise: Promise) {
         val number = "+" + normalizeNumber(phone, countryCode)
@@ -309,304 +311,334 @@ class NimahModule(private val rc: ReactApplicationContext) :
 
     @ReactMethod
     fun openAccessibilitySettings(promise: Promise) {
-        val settings = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-        if (launch(settings)) promise.resolve(true) else promise.reject("NO_SETTINGS", "Accessibility settings unavailable")
+        val ok = launch(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        if (ok) promise.resolve(true) else promise.reject("NO_SETTINGS", "Cannot open settings")
     }
 
+    /**
+     * Turns the Nimah accessibility + notification services ON by itself (no tapping) — possible only after the
+     * one-time grant:  adb shell pm grant com.nimah android.permission.WRITE_SECURE_SETTINGS
+     * Resolves true when the accessibility service is on afterwards, false when the person must switch it on manually.
+     */
     @ReactMethod
     fun enableAccessibilityService(promise: Promise) {
         try {
-            val enabled = NimahAccessibilityService.isEnabled(rc)
-            if (enabled) { promise.resolve(true); return }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && rc.getSystemService(Context.ROLE_SERVICE) != null) {
-                // No-op on modern Android; service is enabled via the Accessibility settings screen.
+            if (NimahAccessibilityService.isEnabled(rc)) { promise.resolve(true); return }
+            if (!granted("android.permission.WRITE_SECURE_SETTINGS")) { promise.resolve(false); return }
+            val cr = rc.contentResolver
+            fun addTo(key: String, component: String) {
+                val cur = android.provider.Settings.Secure.getString(cr, key).orEmpty()
+                if (cur.split(':').any { it.equals(component, ignoreCase = true) }) return
+                val next = if (cur.isBlank()) component else "$cur:$component"
+                android.provider.Settings.Secure.putString(cr, key, next)
             }
-            val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-            if (launch(intent)) promise.resolve(true) else promise.reject("NO_SETTINGS", "Accessibility settings unavailable")
-        } catch (e: Exception) {
-            promise.reject("ENABLE_A11Y_FAILED", e.message, e)
-        }
+            addTo("enabled_accessibility_services", "${rc.packageName}/${rc.packageName}.NimahAccessibilityService")
+            android.provider.Settings.Secure.putInt(cr, "accessibility_enabled", 1)
+            try { addTo("enabled_notification_listeners", "${rc.packageName}/${rc.packageName}.NimahNotificationService") } catch (_: Exception) {}
+            promise.resolve(true)
+        } catch (e: Exception) { promise.resolve(false) }
     }
 
     @ReactMethod
-    fun canWriteSecureSettings(promise: Promise) {
-        val allowed = Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.System.canWrite(rc)
-        promise.resolve(allowed)
-    }
+    fun canWriteSecureSettings(promise: Promise) { promise.resolve(granted("android.permission.WRITE_SECURE_SETTINGS")) }
 
+    /** Asks Android not to kill Nimah in the background (shows a system dialog once). */
     @ReactMethod
     fun requestIgnoreBatteryOptimizations(promise: Promise) {
-        val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${rc.packageName}"))
-        if (launch(intent)) promise.resolve(true) else promise.reject("NO_BATTERY_OPT", "Could not request battery optimization exemption")
+        try {
+            val pm = rc.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+            if (pm.isIgnoringBatteryOptimizations(rc.packageName)) { promise.resolve(true); return }
+            val i = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${rc.packageName}"))
+            promise.resolve(launch(i))
+        } catch (e: Exception) { promise.resolve(false) }
     }
 
-    @ReactMethod
-    fun openNotificationAccessSettings(promise: Promise) {
-        val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
-        if (launch(intent)) promise.resolve(true) else promise.reject("NO_SETTINGS", "Notification access settings unavailable")
-    }
-
+    /** Places the call if CALL_PHONE is granted, otherwise opens the dialer. */
     @ReactMethod
     fun callNumber(phone: String, countryCode: String, promise: Promise) {
         val number = normalizeNumber(phone, countryCode)
-        val intent = Intent(Intent.ACTION_CALL, Uri.parse("tel:$number"))
-        if (granted(Manifest.permission.CALL_PHONE)) {
-            if (launch(intent)) promise.resolve(true) else promise.reject("NO_CALL_APP", "No dialer app found")
-        } else {
-            promise.reject("NO_CALL_PERMISSION", "Phone permission not granted")
-        }
+        val action = if (granted(Manifest.permission.CALL_PHONE)) Intent.ACTION_CALL else Intent.ACTION_DIAL
+        if (launch(Intent(action, Uri.parse("tel:+$number")))) promise.resolve(true)
+        else promise.reject("NO_DIALER", "No phone app found")
     }
 
+    // ------------------------------------------------------------ clock / apps
     @ReactMethod
     fun setAlarm(hour: Int, minute: Int, label: String, promise: Promise) {
-        val intent = Intent(AlarmClock.ACTION_SET_ALARM).apply {
-            putExtra(AlarmClock.EXTRA_HOUR, hour)
-            putExtra(AlarmClock.EXTRA_MINUTES, minute)
-            putExtra(AlarmClock.EXTRA_MESSAGE, label)
-        }
-        if (launch(intent)) promise.resolve(true) else promise.reject("NO_ALARM_APP", "No alarm app found")
+        val intent = Intent(AlarmClock.ACTION_SET_ALARM)
+            .putExtra(AlarmClock.EXTRA_HOUR, hour)
+            .putExtra(AlarmClock.EXTRA_MINUTES, minute)
+            .putExtra(AlarmClock.EXTRA_MESSAGE, label)
+            .putExtra(AlarmClock.EXTRA_SKIP_UI, true)
+        if (launch(intent)) promise.resolve(true) else promise.reject("NO_CLOCK_APP", "No clock app found")
     }
 
     @ReactMethod
     fun setTimer(seconds: Int, label: String, promise: Promise) {
-        val intent = Intent(AlarmClock.ACTION_SET_TIMER).apply {
-            putExtra(AlarmClock.EXTRA_LENGTH, seconds)
-            putExtra(AlarmClock.EXTRA_MESSAGE, label)
-        }
-        if (launch(intent)) promise.resolve(true) else promise.reject("NO_TIMER_APP", "No timer app found")
+        val intent = Intent(AlarmClock.ACTION_SET_TIMER)
+            .putExtra(AlarmClock.EXTRA_LENGTH, seconds)
+            .putExtra(AlarmClock.EXTRA_MESSAGE, label)
+            .putExtra(AlarmClock.EXTRA_SKIP_UI, true)
+        if (launch(intent)) promise.resolve(true) else promise.reject("NO_CLOCK_APP", "No clock app found")
     }
 
+    /** Launches an installed app by (partial) label, e.g. "camera", "youtube". */
     @ReactMethod
     fun openApp(name: String, promise: Promise) {
-        val pkg = rc.packageManager.getLaunchIntentForPackage(name)
-        if (pkg == null) {
-            promise.reject("APP_NOT_FOUND", "No app found for $name")
-            return
-        }
-        if (launch(pkg)) promise.resolve(true) else promise.reject("APP_OPEN_FAILED", "Could not launch app")
+        val pm = rc.packageManager
+        // Forgiving match: ignore case, spaces and punctuation ("tik tok" finds "TikTok").
+        fun norm(x: String) = x.lowercase().filter { it.isLetterOrDigit() }
+        val q = norm(name)
+        if (q.isEmpty()) { promise.reject("APP_NOT_FOUND", "No app name given"); return }
+        val apps = pm.queryIntentActivities(
+            Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0
+        ).map { Triple(it.activityInfo.packageName, it.loadLabel(pm).toString(), norm(it.loadLabel(pm).toString())) }
+        val match = apps.firstOrNull { it.third == q }
+            ?: apps.firstOrNull { it.third.startsWith(q) }
+            ?: apps.firstOrNull { q.isNotEmpty() && it.third.contains(q) }
+            ?: apps.firstOrNull { q.isNotEmpty() && q.contains(it.third) && it.third.length >= 3 }
+            ?: apps.firstOrNull { q.isNotEmpty() && norm(it.first).contains(q) }
+        val launchIntent = match?.let { pm.getLaunchIntentForPackage(it.first) }
+        if (launchIntent != null && launch(launchIntent)) promise.resolve(true)
+        else promise.reject("APP_NOT_FOUND", "No app named $name")
     }
 
+    // ---------------------------------------------------------- maps / media
     @ReactMethod
     fun navigate(destination: String, promise: Promise) {
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/maps/search/?api=1&query=${Uri.encode(destination)}"))
-        if (launch(intent)) promise.resolve(true) else promise.reject("NO_MAPS_APP", "No maps app found")
+        val q = Uri.encode(destination)
+        val nav = Intent(Intent.ACTION_VIEW, Uri.parse("google.navigation:q=$q"))
+            .setPackage("com.google.android.apps.maps")
+        val ok = launch(nav) || launch(Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=$q")))
+        if (ok) promise.resolve(true) else promise.reject("NO_MAPS_APP", "No maps app found")
     }
 
+    /** Asks the default music app to play; falls back to a YouTube search. */
     @ReactMethod
     fun playMusic(query: String, promise: Promise) {
-        val intent = Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH).apply {
-            putExtra(SearchManager.QUERY, query)
-            putExtra(MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/*")
-        }
-        if (launch(intent)) promise.resolve(true) else promise.reject("NO_MUSIC_APP", "No music app found")
+        val play = Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH)
+            .putExtra(MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/*")
+            .putExtra(SearchManager.QUERY, query)
+        val yt = Intent(Intent.ACTION_VIEW,
+            Uri.parse("https://www.youtube.com/results?search_query=${Uri.encode(query)}"))
+        if (launch(play) || launch(yt)) promise.resolve(true)
+        else promise.reject("NO_MUSIC_APP", "No music app found")
     }
 
     @ReactMethod
     fun setFlashlight(on: Boolean, promise: Promise) {
-        val cameraManager = rc.getSystemService(CameraManager::class.java)
-        val id = cameraManager.cameraIdList.firstOrNull() ?: run {
-            promise.reject("NO_CAMERA", "No camera found")
-            return
-        }
         try {
-            cameraManager.setTorchMode(id, on)
+            val cm = rc.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+            val id = cm.cameraIdList.firstOrNull {
+                cm.getCameraCharacteristics(it).get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+            }
+            if (id == null) { promise.reject("NO_FLASH", "No flashlight on this device"); return }
+            cm.setTorchMode(id, on)
             promise.resolve(true)
         } catch (e: Exception) {
-            promise.reject("FLASHLIGHT_FAILED", e.message, e)
+            promise.reject("FLASH_FAILED", e.message, e)
         }
     }
 
+    // ======================================================== FULL PHONE CONTROL
+    // Everything below needs the Nimah Accessibility Service to be switched on.
+
+    private fun a11y(promise: Promise): NimahAccessibilityService? {
+        val s = NimahAccessibilityService.instance
+        if (s == null) promise.reject("A11Y_NOT_ENABLED", "Nimah accessibility service is not enabled")
+        return s
+    }
+
+    /** Reads the screen: {package, text, count, width, height}. */
     @ReactMethod
-    fun startBackgroundService(promise: Promise) {
-        val intent = Intent(rc, NimahService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            rc.startForegroundService(intent)
-        } else {
-            rc.startService(intent)
-        }
-        promise.resolve(true)
+    fun screenRead(promise: Promise) {
+        val s = a11y(promise) ?: return
+        Thread {
+            try {
+                val snap = s.snapshot()
+                promise.resolve(Arguments.createMap().apply {
+                    putString("package", snap.pkg); putString("text", snap.text)
+                    putInt("count", snap.count); putInt("width", snap.width); putInt("height", snap.height)
+                })
+            } catch (e: Exception) { promise.reject("SCREEN_FAILED", e.message, e) }
+        }.start()
+    }
+
+    /** base64 JPEG of the screen, or null (Android < 11 / blocked window). */
+    @ReactMethod
+    fun screenshot(promise: Promise) {
+        val s = a11y(promise) ?: return
+        main.post { s.screenshotBase64 { promise.resolve(it) } }
     }
 
     @ReactMethod
-    fun stopBackgroundService(promise: Promise) {
-        rc.stopService(Intent(rc, NimahService::class.java))
-        promise.resolve(true)
+    fun uiClick(id: Int, long: Boolean, promise: Promise) {
+        val s = a11y(promise) ?: return
+        Thread { promise.resolve(s.clickNode(id, long)) }.start()
     }
 
+    /** id = -1 -> the currently focused input. */
+    @ReactMethod
+    fun uiType(id: Int, text: String, submit: Boolean, promise: Promise) {
+        val s = a11y(promise) ?: return
+        Thread { promise.resolve(s.setText(if (id >= 0) id else null, text, submit)) }.start()
+    }
+
+    /** id = -1 -> first scrollable area. direction: up | down | left | right (where the content should go). */
+    @ReactMethod
+    fun uiScroll(direction: String, id: Int, promise: Promise) {
+        val s = a11y(promise) ?: return
+        Thread { promise.resolve(s.scroll(direction, if (id >= 0) id else null)) }.start()
+    }
+
+    @ReactMethod
+    fun uiGesture(x1: Double, y1: Double, x2: Double, y2: Double, durationMs: Int, promise: Promise) {
+        val s = a11y(promise) ?: return
+        Thread { promise.resolve(s.gesture(x1.toFloat(), y1.toFloat(), x2.toFloat(), y2.toFloat(), durationMs.toLong())) }.start()
+    }
+
+    /** back | home | recents | notifications | quick_settings | power_menu | lock_screen | take_screenshot */
+    @ReactMethod
+    fun uiGlobal(name: String, promise: Promise) {
+        val s = a11y(promise) ?: return
+        promise.resolve(s.global(name))
+    }
+
+    /** Resolves when the UI has been quiet for [quietMs] (or after [timeoutMs]). */
+    @ReactMethod
+    fun waitForIdle(quietMs: Int, timeoutMs: Int, promise: Promise) {
+        Thread {
+            val end = System.currentTimeMillis() + timeoutMs
+            while (System.currentTimeMillis() < end) {
+                if (System.currentTimeMillis() - NimahAccessibilityService.lastEventAt >= quietMs) break
+                try { Thread.sleep(60) } catch (e: InterruptedException) { break }
+            }
+            promise.resolve(true)
+        }.start()
+    }
+
+    /** Emergency stop (Volume Down held + Volume Up). Returns true once, then resets. */
+    @ReactMethod
+    fun consumeStopRequest(promise: Promise) {
+        val v = NimahAccessibilityService.stopRequested
+        NimahAccessibilityService.stopRequested = false
+        promise.resolve(v)
+    }
+
+    // ------------------------------------------------------------ system helpers
+    /** level 0..100 on the music stream (or "ring"/"alarm"). */
     @ReactMethod
     fun setVolume(percent: Int, stream: String, promise: Promise) {
-        val audio = rc.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        val streamId = when (stream.lowercase()) {
-            "music" -> AudioManager.STREAM_MUSIC
-            "alarm" -> AudioManager.STREAM_ALARM
-            "ring" -> AudioManager.STREAM_RING
-            else -> AudioManager.STREAM_MUSIC
-        }
-        val max = audio.getStreamMaxVolume(streamId)
-        val target = (percent.coerceIn(0, 100) / 100.0 * max).toInt().coerceAtLeast(0)
-        audio.setStreamVolume(streamId, target, 0)
-        promise.resolve(true)
+        try {
+            val am = rc.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            val type = when (stream) {
+                "ring" -> AudioManager.STREAM_RING
+                "alarm" -> AudioManager.STREAM_ALARM
+                "call" -> AudioManager.STREAM_VOICE_CALL
+                else -> AudioManager.STREAM_MUSIC
+            }
+            val max = am.getStreamMaxVolume(type)
+            am.setStreamVolume(type, (percent.coerceIn(0, 100) * max / 100), AudioManager.FLAG_SHOW_UI)
+            promise.resolve(true)
+        } catch (e: Exception) { promise.reject("VOLUME_FAILED", e.message, e) }
     }
 
+    /** {time, date, battery, charging, musicVolume} — lets the AI answer "what time is it?" etc. */
     @ReactMethod
     fun deviceInfo(promise: Promise) {
-        val map = Arguments.createMap().apply {
-            putString("time", java.time.LocalTime.now().toString())
-            putString("date", java.time.LocalDate.now().toString())
-            putDouble("battery", 0.0)
-            putBoolean("charging", false)
-            putInt("musicVolume", 0)
-        }
-        promise.resolve(map)
+        try {
+            val bm = rc.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
+            val am = rc.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            val now = java.util.Calendar.getInstance()
+            promise.resolve(Arguments.createMap().apply {
+                putString("time", java.text.SimpleDateFormat("h:mm a", Locale.US).format(now.time))
+                putString("date", java.text.SimpleDateFormat("EEEE, d MMMM yyyy", Locale.US).format(now.time))
+                putInt("battery", bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY))
+                putBoolean("charging", bm.isCharging)
+                putInt("musicVolume", am.getStreamVolume(AudioManager.STREAM_MUSIC) * 100 /
+                    am.getStreamMaxVolume(AudioManager.STREAM_MUSIC))
+            })
+        } catch (e: Exception) { promise.reject("INFO_FAILED", e.message, e) }
     }
 
     @ReactMethod
     fun openUrl(url: String, promise: Promise) {
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-        if (launch(intent)) promise.resolve(true) else promise.reject("NO_URL_APP", "No browser app found")
+        val u = if (url.startsWith("http://") || url.startsWith("https://")) url else "https://$url"
+        if (launch(Intent(Intent.ACTION_VIEW, Uri.parse(u)))) promise.resolve(true)
+        else promise.reject("NO_BROWSER", "No browser found")
     }
 
+    /** page: wifi | bluetooth | display | sound | battery | apps | location | airplane | data | storage | date | accessibility | main */
     @ReactMethod
     fun openSettings(page: String, promise: Promise) {
-        val intent = when (page.lowercase()) {
-            "wifi" -> Intent(Settings.ACTION_WIFI_SETTINGS)
-            "bluetooth" -> Intent(Settings.ACTION_BLUETOOTH_SETTINGS)
-            "battery" -> Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS)
-            else -> Intent(Settings.ACTION_SETTINGS)
+        val action = when (page) {
+            "wifi" -> Settings.ACTION_WIFI_SETTINGS
+            "bluetooth" -> Settings.ACTION_BLUETOOTH_SETTINGS
+            "display" -> Settings.ACTION_DISPLAY_SETTINGS
+            "sound" -> Settings.ACTION_SOUND_SETTINGS
+            "battery" -> Intent.ACTION_POWER_USAGE_SUMMARY
+            "apps" -> Settings.ACTION_APPLICATION_SETTINGS
+            "location" -> Settings.ACTION_LOCATION_SOURCE_SETTINGS
+            "airplane" -> Settings.ACTION_AIRPLANE_MODE_SETTINGS
+            "data" -> Settings.ACTION_DATA_ROAMING_SETTINGS
+            "storage" -> Settings.ACTION_INTERNAL_STORAGE_SETTINGS
+            "date" -> Settings.ACTION_DATE_SETTINGS
+            "accessibility" -> Settings.ACTION_ACCESSIBILITY_SETTINGS
+            else -> Settings.ACTION_SETTINGS
         }
-        if (launch(intent)) promise.resolve(true) else promise.reject("NO_SETTINGS", "Settings unavailable")
+        if (launch(Intent(action))) promise.resolve(true) else promise.reject("NO_SETTINGS", "Cannot open settings")
     }
 
+    // ------------------------------------------------------------ notifications
     @ReactMethod
     fun isNotificationAccessEnabled(promise: Promise) { promise.resolve(NimahNotificationService.isEnabled(rc)) }
 
     @ReactMethod
     fun openNotificationAccessSettings(promise: Promise) {
-        val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
-        if (launch(intent)) promise.resolve(true) else promise.reject("NO_SETTINGS", "Notification access settings unavailable")
+        if (launch(Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"))) promise.resolve(true)
+        else promise.reject("NO_SETTINGS", "Cannot open settings")
     }
 
+    /** [{key, app, title, text}] — newest first as reported by Android. */
     @ReactMethod
     fun getNotifications(promise: Promise) {
-        val arr = Arguments.createArray()
-        val items = NimahNotificationService.instance?.current() ?: emptyList()
-        for (item in items) {
-            val map = Arguments.createMap().apply {
-                putString("key", item.key)
-                putString("app", item.app)
-                putString("title", item.title)
-                putString("text", item.text)
-            }
-            arr.pushMap(map)
+        val svc = NimahNotificationService.instance
+        if (svc == null) { promise.reject("NOTIF_NOT_ENABLED", "Notification access is not enabled"); return }
+        val out = Arguments.createArray()
+        svc.current().forEach {
+            out.pushMap(Arguments.createMap().apply {
+                putString("key", it.key); putString("app", it.app)
+                putString("title", it.title); putString("text", it.text)
+            })
         }
-        promise.resolve(arr)
+        promise.resolve(out)
     }
 
     @ReactMethod
     fun dismissNotification(key: String, promise: Promise) {
-        val service = NimahNotificationService.instance ?: run {
-            promise.reject("NO_NOTIFICATION_ACCESS", "Notification access is off")
-            return
-        }
-        service.dismiss(key)
-        promise.resolve(true)
+        val svc = NimahNotificationService.instance
+        if (svc == null) { promise.reject("NOTIF_NOT_ENABLED", "Notification access is not enabled"); return }
+        svc.cancelNotification(key); promise.resolve(true)
+    }
+
+    // -------------------------------------------------------- background mode
+    @ReactMethod
+    fun startBackgroundService(promise: Promise) {
+        try {
+            ContextCompat.startForegroundService(rc, Intent(rc, NimahService::class.java))
+            promise.resolve(true)
+        } catch (e: Exception) { promise.reject("SERVICE_FAILED", e.message, e) }
     }
 
     @ReactMethod
-    fun screenRead(promise: Promise) {
-        val snapshot = NimahAccessibilityService.instance?.snapshot() ?: run {
-            promise.reject("NO_ACCESSIBILITY", "Accessibility service unavailable")
-            return
-        }
-        val map = Arguments.createMap().apply {
-            putString("package", snapshot.pkg)
-            putString("text", snapshot.text)
-            putInt("count", snapshot.count)
-            putInt("width", snapshot.width)
-            putInt("height", snapshot.height)
-        }
-        promise.resolve(map)
+    fun stopBackgroundService(promise: Promise) {
+        rc.stopService(Intent(rc, NimahService::class.java)); promise.resolve(true)
     }
 
-    @ReactMethod
-    fun screenshot(promise: Promise) {
-        val bitmap = NimahAccessibilityService.instance?.screenshot() ?: run {
-            promise.resolve(null)
-            return
-        }
-        val stream = ByteArrayOutputStream()
-        bitmap.compress(Bitmap.CompressFormat.JPEG, 80, stream)
-        promise.resolve(Base64.encodeToString(stream.toByteArray(), Base64.NO_WRAP))
-    }
-
-    @ReactMethod
-    fun uiClick(id: Int, long: Boolean, promise: Promise) {
-        val service = NimahAccessibilityService.instance ?: run {
-            promise.reject("NO_ACCESSIBILITY", "Accessibility service unavailable")
-            return
-        }
-        val ok = service.click(id, long)
-        promise.resolve(ok)
-    }
-
-    @ReactMethod
-    fun uiType(id: Int, text: String, submit: Boolean, promise: Promise) {
-        val service = NimahAccessibilityService.instance ?: run {
-            promise.reject("NO_ACCESSIBILITY", "Accessibility service unavailable")
-            return
-        }
-        val ok = service.type(id, text, submit)
-        promise.resolve(ok)
-    }
-
-    @ReactMethod
-    fun uiScroll(direction: String, id: Int, promise: Promise) {
-        val service = NimahAccessibilityService.instance ?: run {
-            promise.reject("NO_ACCESSIBILITY", "Accessibility service unavailable")
-            return
-        }
-        val ok = service.scroll(direction, id)
-        promise.resolve(ok)
-    }
-
-    @ReactMethod
-    fun uiGesture(x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Int, promise: Promise) {
-        val service = NimahAccessibilityService.instance ?: run {
-            promise.reject("NO_ACCESSIBILITY", "Accessibility service unavailable")
-            return
-        }
-        val ok = service.gesture(x1, y1, x2, y2, durationMs)
-        promise.resolve(ok)
-    }
-
-    @ReactMethod
-    fun uiGlobal(name: String, promise: Promise) {
-        val service = NimahAccessibilityService.instance ?: run {
-            promise.reject("NO_ACCESSIBILITY", "Accessibility service unavailable")
-            return
-        }
-        val ok = service.global(name)
-        promise.resolve(ok)
-    }
-
-    @ReactMethod
-    fun waitForIdle(quietMs: Int, timeoutMs: Int, promise: Promise) {
-        val service = NimahAccessibilityService.instance ?: run {
-            promise.reject("NO_ACCESSIBILITY", "Accessibility service unavailable")
-            return
-        }
-        val ok = service.waitForIdle(quietMs, timeoutMs)
-        promise.resolve(ok)
-    }
-
-    @ReactMethod
-    fun consumeStopRequest(promise: Promise) {
-        val req = NimahAccessibilityService.consumeStopRequest()
-        promise.resolve(req)
-    }
-
-    companion object {
-        private const val TAG = "NimahModule"
+    // --------------------------------------------------------------- lifecycle
+    override fun invalidate() {
+        main.post { recognizer?.destroy(); recognizer = null }
+        tts?.stop(); tts?.shutdown(); tts = null
+        super.invalidate()
     }
 }
-
