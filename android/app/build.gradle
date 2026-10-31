@@ -1,0 +1,87 @@
+apply plugin: "com.android.application"
+apply plugin: "org.jetbrains.kotlin.android"
+apply plugin: "com.facebook.react"
+
+/**
+ * This is the configuration block to customize your React Native Android app.
+ * By default you don't need to apply any configuration, just uncomment the lines you need.
+ */
+react {
+    /* Autolinking */
+    autolinkLibrariesWithApp()
+}
+
+/**
+ * Set this to true to Run Proguard on Release builds to minify the Java bytecode.
+ */
+def enableProguardInReleaseBuilds = false
+
+/**
+ * The preferred build flavor of JavaScriptCore (JSC)
+ */
+def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
+
+// Release signing comes ONLY from environment variables (GitHub secrets). Nothing is committed.
+def nimahStore = System.getenv("NIMAH_KEYSTORE_FILE")
+def hasReleaseKey = nimahStore && new File(nimahStore).exists() &&
+    System.getenv("NIMAH_KEYSTORE_PASSWORD") && System.getenv("NIMAH_KEY_ALIAS") && System.getenv("NIMAH_KEY_PASSWORD")
+
+// Build number from CI (GitHub run number); 1 on a local build.
+def nimahVersionCode = (System.getenv("VERSION_CODE") ?: "1").toInteger()
+
+android {
+    ndkVersion rootProject.ext.ndkVersion
+    buildToolsVersion rootProject.ext.buildToolsVersion
+    compileSdk rootProject.ext.compileSdkVersion
+
+    namespace "com.nimah"
+    defaultConfig {
+        applicationId "com.nimah"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode = nimahVersionCode
+        versionName = "1.0." + nimahVersionCode
+    }
+    signingConfigs {
+        if (hasReleaseKey) {
+            release {
+                storeFile new File(nimahStore)
+                storePassword System.getenv("NIMAH_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("NIMAH_KEY_ALIAS")
+                keyPassword System.getenv("NIMAH_KEY_PASSWORD")
+            }
+        }
+        debug {
+            storeFile file('debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+    }
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
+        release {
+            // Real release key when the secrets exist, otherwise debug-signed (installable, not for Play Store).
+            signingConfig hasReleaseKey ? signingConfigs.release : signingConfigs.debug
+            minifyEnabled enableProguardInReleaseBuilds
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+        }
+    }
+}
+
+dependencies {
+    // The version of react-native is set by the React Native Gradle Plugin
+    implementation("com.facebook.react:react-android")
+
+    // On-device OCR (bundled Latin model; no Sinhala), fingerprint / face / PIN prompt
+    implementation("com.google.mlkit:text-recognition:16.0.1")
+    implementation("androidx.biometric:biometric:1.1.0")
+
+    if (hermesEnabled.toBoolean()) {
+        implementation("com.facebook.react:hermes-android")
+    } else {
+        implementation jscFlavor
+    }
+}
